@@ -1,0 +1,12 @@
+{
+  "name": "fillout-train",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FillOut 字段分类模型离线训练脚本",
+  "scripts": {
+    "train": "node train.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0"
+  }
+}
