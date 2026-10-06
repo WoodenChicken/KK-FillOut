@@ -1,4 +1,4 @@
-# 智能填表助手 FillOut
+# 智能填表助手 KK-FillOut
 
 **本地简历库 + 网页表单自动填充** 的 Chrome/Edge 浏览器扩展（Manifest V3）。
 
