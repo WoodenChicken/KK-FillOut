@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "智能填表助手 FillOut",
+  "version": "0.1.0",
+  "description": "本地简历库 + 网页表单自动填充。数据 100% 存储在本地，不上云、不收集简历内容，无任何远程请求。",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "智能填表助手：点击开关「填表小精灵」悬浮球",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": [
+        "utils/schema.js",
+        "utils/regions.js",
+        "content/matcher.js",
+        "content/scanner.js",
+        "content/filler.js",
+        "content/highlight.js",
+        "content/floatball.js",
+        "content/adapters.js",
+        "content/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "permissions": ["storage", "scripting", "sidePanel", "webNavigation", "contextMenus"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "commands": {
+    "toggle-ball": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+B",
+        "mac": "Command+Shift+B"
+      },
+      "description": "显示 / 隐藏「填表小精灵」悬浮球"
+    }
+  },
+  "side_panel": {
+    "default_path": "panel/panel.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["models/*"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}

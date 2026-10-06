@@ -7,29 +7,27 @@
 ```
 FillOut/
 ├─ extension/                 # 插件本体（Chrome「加载已解压的扩展程序」直接指向这里）
-│  ├─ manifest.json           # MV3 配置：快捷键 Ctrl+Shift+B、Side Panel、内容脚本
-│  ├─ background/
-│  │  └─ service-worker.js    # 快捷键/工具栏/右键菜单/SPA路由通知/SidePanel/样本IndexedDB/按需注入TFJS
-│  ├─ content/
-│  │  ├─ content.js           # 总控：装载简历→适配器→扫描→匹配→填充→悬浮球（含聚焦追踪+手动填写）
-│  │  ├─ scanner.js           # DOM 扫描：input/textarea/select/radio/checkbox/contenteditable + 标签提取
-│  │  ├─ matcher.js           # 打分引擎：同义词词典→特异度仲裁→类型提示→组上下文→ML融合→分档
-│  │  ├─ filler.js            # 填充引擎：原生setter(React/Vue兼容)/select匹配/日期格式化/级联/撤销
-│  │  ├─ highlight.js         # 命中描边+编号角标（默认关闭，设置页可开启）
-│  │  ├─ floatball.js         # 「填表小精灵」悬浮球：全字段列表+每行「填写」按钮（填入当前聚焦输入框）
-│  │  └─ adapters.js          # 站点适配器：北森/智联/Moka/BOSS/Phoenix + data-field-name 直查表
-│  ├─ panel/                  # Side Panel 简历编辑器（分组表单/导入导出/JSON直编/设置/隐私）
-│  ├─ parser/
-│  │  ├─ parse.js             # 入口：按扩展名分发；pdf.js 文本层提取（按 y 聚类成行）
-│  │  ├─ docx.js              # 零依赖 ZIP 解析 + DecompressionStream 解压 word/document.xml
-│  │  └─ extractor.js         # 文本→字段：分节标题 + 正则抽取（教育/实习/工作/项目/家庭/证书/荣誉/技能）
-│  ├─ ml/tf-bridge.js         # TFJS 推理桥（注入页面 ISOLATED 世界，CPU 后端，离线）
-│  ├─ models/                 # 预训练模型（67 类字段分类器，weights ~0.9MB，可再训练替换）
-│  ├─ utils/                  # schema.js（标准字段 Schema）+ regions.js（GB/T 2260 省市数据）
-│  └─ vendor/                 # 离线库：pdf.js 3.11 / TensorFlow.js 3.18
-├─ ml/train/                  # 模型训练脚本（Node + TFJS，全离线）
-├─ scripts/gen-icons.js       # 图标生成（零依赖 PNG 编码）
-└─ test/                      # 冒烟测试：harness.html + mock-form.html（北森/Moka 混合风格模拟表单）
+    ├─ manifest.json           # MV3 配置：快捷键 Ctrl+Shift+B、Side Panel、内容脚本
+    ├─ background/
+    │  └─ service-worker.js    # 快捷键/工具栏/右键菜单/SPA路由通知/SidePanel/样本IndexedDB/按需注入TFJS
+    ├─ content/
+    │  ├─ content.js           # 总控：装载简历→适配器→扫描→匹配→填充→悬浮球（含聚焦追踪+手动填写）
+    │  ├─ scanner.js           # DOM 扫描：input/textarea/select/radio/checkbox/contenteditable + 标签提取
+    │  ├─ matcher.js           # 打分引擎：同义词词典→特异度仲裁→类型提示→组上下文→ML融合→分档
+    │  ├─ filler.js            # 填充引擎：原生setter(React/Vue兼容)/select匹配/日期格式化/级联/撤销
+    │  ├─ highlight.js         # 命中描边+编号角标（默认关闭，设置页可开启）
+    │  ├─ floatball.js         # 「填表小精灵」悬浮球：全字段列表+每行「填写」按钮（填入当前聚焦输入框）
+    │  └─ adapters.js          # 站点适配器：北森/智联/Moka/BOSS/Phoenix + data-field-name 直查表
+    ├─ panel/                  # Side Panel 简历编辑器（分组表单/导入导出/JSON直编/设置/隐私）
+    ├─ parser/
+    │  ├─ parse.js             # 入口：按扩展名分发；pdf.js 文本层提取（按 y 聚类成行）
+    │  ├─ docx.js              # 零依赖 ZIP 解析 + DecompressionStream 解压 word/document.xml
+    │  └─ extractor.js         # 文本→字段：分节标题 + 正则抽取（教育/实习/工作/项目/家庭/证书/荣誉/技能）
+    ├─ ml/tf-bridge.js         # TFJS 推理桥（注入页面 ISOLATED 世界，CPU 后端，离线）
+    ├─ models/                 # 预训练模型（67 类字段分类器，weights ~0.9MB，可再训练替换）
+    ├─ utils/                  # schema.js（标准字段 Schema）+ regions.js（GB/T 2260 省市数据）
+    └─ vendor/                 # 离线库：pdf.js 3.11 / TensorFlow.js 3.18
+
 ```
 
 ## 安装（开发者模式）
@@ -98,28 +96,7 @@ npm run train
 - Side Panel 提供「🗑 清除全部本地数据」（storage + IndexedDB 一键清空），卸载前建议先执行
 - 悬浮球/角标渲染在页面根节点的 Closed Shadow DOM 中，不污染站点样式，Esc 可关闭
 
-## 测试
-
-```bash
-cd 项目根目录
-python -m http.server 8765
-# 浏览器打开 http://127.0.0.1:8765/test/harness.html
-```
-
-harness 会以扩展 manifest 相同的脚本顺序加载引擎，对模拟 ATS 表单（45 个控件）执行扫描→匹配→填充断言。当前结果：**41/41 全部通过**，覆盖：25 项字段映射、双段教育经历分段、42 项自动填充、日期格式化（ISO 与中文年月）、省市级联（含异步城市加载）、contenteditable 富文本。
-
-## 验收标准（DoD）对照
-
-| DoD | 状态 | 说明 |
-|---|---|---|
-| 1. PDF/DOC 拖入 10 秒生成 resume.json，准确率 ≥85% | ✅ 已实现 | pdf.js/DOCX 本地解析 + 分节启发式抽取；准确率取决于版式，建议用真实简历复核 |
-| 2. 五站点投递填充成功率 ≥90% | 🟡 引擎就绪 | 通用引擎 + 五家适配器已写好；真实站点 DOM 会变动，需按上文「适配器指南」现场校准选择器 |
-| 3. Ctrl+Shift+B 稳定唤起/隐藏 | ✅ 已实现 | chrome.commands + 内容脚本键盘双路径（带去抖），工具栏/右键菜单亦可 |
-| 4. TFJS 首屏推理 <200ms | ✅ 已实现 | 模型 ~0.9MB、CPU 后端单控件毫秒级；无模型时自动退回规则 |
-| 5. 控制台无外发请求 | ✅ 已实现 | 代码无远程请求；可用 DevTools Network 面板复核 |
-| 6. 离线全可用 | ✅ 已实现 | pdf.js/TFJS/模型/词表全部打包在扩展内 |
-
-## 已知限制
+## 其他说明
 
 - 扫描型 PDF（无文本层）会提示走 OCR（可粘贴文本到 .txt 导入）
 - `.doc` 老格式为 best-effort 提取，建议另存 `.docx`/`.pdf`

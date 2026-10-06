@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>智能填表助手 · 简历编辑器</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="hd-title">🧚 智能填表助手 <span class="hd-sub">数据仅存本地</span></div>
+    <div class="hd-status" id="save-status">已保存</div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="resume">简历数据</button>
+    <button class="tab" data-tab="import">导入 / 导出</button>
+    <button class="tab" data-tab="json">JSON 直编</button>
+    <button class="tab" data-tab="settings">设置</button>
+  </nav>
+
+  <main>
+    <!-- 简历数据 -->
+    <section id="tab-resume" class="tabpane active">
+      <div id="resume-forms"><!-- JS 渲染 --></div>
+      <div class="foot-tip">
+        填写越完整，网页自动填充命中率越高。所有改动自动保存到本地 chrome.storage.local。
+      </div>
+    </section>
+
+    <!-- 导入 / 导出 -->
+    <section id="tab-import" class="tabpane">
+      <div class="drop" id="drop">
+        <input type="file" id="file-input" accept=".pdf,.doc,.docx,.json,.md,.markdown,.txt" hidden />
+        <div class="drop-ico">📄</div>
+        <div class="drop-t1">拖入简历文件，或 <button class="link" id="pick-file">选择文件</button></div>
+        <div class="drop-t2">支持 PDF / DOC / DOCX / JSON / Markdown / TXT · 10 秒内本地解析完成</div>
+      </div>
+
+      <div id="import-result" class="result" style="display:none">
+        <div class="result-title" id="result-title"></div>
+        <div class="result-detail" id="result-detail"></div>
+        <div class="result-ops">
+          <button class="btn primary" id="import-overwrite">覆盖导入</button>
+          <button class="btn" id="import-merge">合并导入（保留已有值）</button>
+          <button class="btn ghost" id="import-cancel">取消</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="row">
+        <button class="btn primary" id="export-json">⬇ 导出 resume.json 备份</button>
+      </div>
+    </section>
+
+    <!-- JSON 直编 -->
+    <section id="tab-json" class="tabpane">
+      <div class="json-tip">高级用法：直接编辑标准 resume.json。结构与「简历数据」页一致，改完点「应用」生效。</div>
+      <textarea id="json-editor" spellcheck="false" placeholder='{
+  "basicInfo": { "name": "张三", "phone": "13800138000", ... }
+}'></textarea>
+      <div class="result-ops">
+        <button class="btn primary" id="json-apply">应用 JSON</button>
+        <button class="btn" id="json-refresh">从当前数据刷新</button>
+      </div>
+      <div class="json-msg" id="json-msg"></div>
+    </section>
+
+    <!-- 设置 -->
+    <section id="tab-settings" class="tabpane">
+      <h3>填充策略</h3>
+      <label class="setting-line">
+        <input type="checkbox" id="set-highlight" /> 网页上显示命中高亮与编号角标
+      </label>
+      <label class="setting-line">
+        <input type="checkbox" id="set-ml" /> 启用本地 TFJS 模型辅助识别（模型缺失时自动退回规则）
+      </label>
+      <div class="setting-line slider-line">
+        <span>自动填充阈值</span>
+        <input type="range" id="set-auto" min="0.6" max="0.95" step="0.05" />
+        <b id="set-auto-v">0.85</b>
+      </div>
+      <div class="setting-line slider-line">
+        <span>弹窗确认阈值</span>
+        <input type="range" id="set-confirm" min="0.3" max="0.8" step="0.05" />
+        <b id="set-confirm-v">0.5</b>
+      </div>
+      <div class="hint">置信度 ≥ 自动阈值：一键填充直接写入；介于两阈值之间：点角标确认后填入；低于确认阈值：仅标记不填。</div>
+
+      <div class="divider"></div>
+      <h3>训练样本（在线学习，仅本地）</h3>
+      <div class="row between">
+        <span id="samples-count">本地样本：0 条</span>
+        <button class="btn" id="export-samples">导出样本 JSONL</button>
+      </div>
+      <div class="hint">每次你在网页上「确认/修正」一个字段，都会存一条样本。每周把样本 JSONL 喂给 ml/train/train.js 重新训练，把产出模型放进 extension/models/ 即可提升命中率（全程离线）。</div>
+
+      <div class="divider"></div>
+      <h3>隐私与数据</h3>
+      <div class="hint">
+        本插件不发起任何远程请求：简历内容只存在 chrome.storage.local + IndexedDB。
+        卸载前建议先清除数据：
+      </div>
+      <div class="row">
+        <button class="btn danger" id="clear-all">🗑 清除全部本地数据</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="../vendor/pdf.min.js"></script>
+  <script src="../utils/schema.js"></script>
+  <script src="../parser/extractor.js"></script>
+  <script src="../parser/docx.js"></script>
+  <script src="../parser/parse.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>
