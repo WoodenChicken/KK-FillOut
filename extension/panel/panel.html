@@ -50,6 +50,13 @@
       <div class="row">
         <button class="btn primary" id="export-json">⬇ 导出 resume.json 备份</button>
       </div>
+
+      <div class="divider"></div>
+      <h3>视觉识别（截图 OCR 兜底）</h3>
+      <div class="row">
+        <button class="btn" id="ocr-scan">👁 视觉识别当前页面表单</button>
+      </div>
+      <div class="hint">当页面表单由组件库自绘（无 label 元素）导致识别不到字段时使用：截取目标页面当前视口，本地 OCR 找出文字标签并按位置关联控件。识别前请把目标页面滚到要填的区域并保持前台，识别仅在本机进行。</div>
     </section>
 
     <!-- JSON 直编 -->

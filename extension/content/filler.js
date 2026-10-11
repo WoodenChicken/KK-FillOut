@@ -82,11 +82,24 @@
         case 'textarea':
         case 'date': {
           var v = String(value);
-          if (ctrl.kind === 'date' || (opts.key && /(^|\.)((birth|available|start|end)Date|date)$/.test(opts.key))) {
+          var isDateish = ctrl.kind === 'date' ||
+            (opts.key && /(^|\.)((birth|available|start|end)Date|date)$/.test(opts.key));
+          var hints = norm([ctrl.signals.placeholder, ctrl.signals.labelText, ctrl.signals.ocrText || '',
+            ctrl.signals.name, ctrl.signals.id].join(' '));
+          if (isDateish) {
             v = formatDateValue(value, ctrl);
+            // 组件日期选择器（无原生 type、站点也没声明年月格式）一般要求到日：
+            // 简历里只有年月时补 1 日并提示核对；已声明 YYYY-MM 的纯文本框保持年月
+            if (ctrl.kind !== 'date' && ctrl.kind !== 'month' && /^\d{4}-\d{2}$/.test(v) &&
+              !/(yyyy[-/\s]*mm|yyyy年mm|年月|mm\/yyyy)/i.test(hints)) {
+              v += '-01';
+              result.fuzzy = true;
+            }
           }
           undoPush(el);
           setNativeValue(el, v);
+          // antd DatePicker 等组件：输入后需要 Enter/blur 提交；原生 date 输入派发 Enter 无副作用
+          if (isDateish || /日期|时间|date|picker/.test(hints)) commitEnter(el);
           if (opts.blur !== false) {
             el.dispatchEvent(new Event('blur', { bubbles: true }));
             el.dispatchEvent(new Event('focusout', { bubbles: true }));
@@ -139,6 +152,14 @@
           result.ok = true;
           break;
         }
+        case 'combobox': {
+          // antd Select / 组件库组合控件：打开下拉 → 搜索过滤 → 点选/回车提交。
+          // 异步流程，先回 ok + async，由 fillCombobox 完成后自行 toast 结果。
+          result.ok = true;
+          result.async = true;
+          fillCombobox(ctrl, value);
+          break;
+        }
         default:
           result.message = '未知控件类型';
       }
@@ -147,6 +168,119 @@
     }
     return result;
   };
+
+  /** 派发 Enter 键事件（组件库日期/下拉控件用它提交已输入的值） */
+  function commitEnter(el) {
+    ['keydown', 'keypress', 'keyup'].forEach(function (t) {
+      try {
+        el.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      } catch (e) { /* 老浏览器忽略 */ }
+    });
+  }
+
+  function commitEscape(el) {
+    ['keydown', 'keyup'].forEach(function (t) {
+      try {
+        el.dispatchEvent(new KeyboardEvent(t, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      } catch (e) { /* noop */ }
+    });
+  }
+
+  /** 轮询等待：fn 返回真值即成功 resolve(真值)；超时 resolve(null) */
+  function waitFor(fn, timeout) {
+    return new Promise(function (resolve) {
+      var t0 = Date.now();
+      (function poll() {
+        var v = null;
+        try { v = fn(); } catch (e) { /* 下一步 */ }
+        if (v) return resolve(v);
+        if (Date.now() - t0 > (timeout || 4000)) return resolve(null);
+        setTimeout(poll, 160);
+      })();
+    });
+  }
+
+  /** 当前 combobox 输入框对应的下拉选项：优先 aria-controls 精确定位，退回最后一个可见下拉。
+   *  覆盖 antd Select（option）与 TreeSelect/Cascader（tree 节点）；虚拟列表只看已渲染的可见项。 */
+  function comboboxOptions(el) {
+    var listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    var root = listId ? document.getElementById(listId) : null;
+    if (!root) {
+      var dds = document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden), [class*="select-dropdown"]:not([class*="dropdown-hidden"])');
+      for (var i = dds.length - 1; i >= 0; i--) {
+        if (dds[i].getClientRects().length) { root = dds[i]; break; }
+      }
+    }
+    if (!root) return [];
+    var nodes = root.querySelectorAll('.ant-select-item-option,[role="option"],.ant-select-tree-treenode,[role="treeitem"]');
+    return Array.prototype.filter.call(nodes, function (n) { return n.getClientRects().length > 0; });
+  }
+
+  function optionText(o) {
+    var t = o.querySelector('.ant-select-tree-title');
+    return norm((t ? t.textContent : o.textContent) || '').replace(/[\u2713\u2714]/g, '');
+  }
+
+  /** 在可见选项里挑与 want 最匹配的：全等 → 双向包含 → null（由上层决定是否兜底第一项） */
+  function pickIn(opts, want) {
+    if (!opts.length) return null;
+    var texts = opts.map(function (o) { return optionText(o); });
+    var i = texts.findIndex(function (t) { return t === want; });
+    if (i === -1) i = texts.findIndex(function (t) { return t && t.indexOf(want) !== -1; });
+    if (i === -1) i = texts.findIndex(function (t) { return t && want.indexOf(t) !== -1 && t.length >= 2; });
+    return i === -1 ? null : { el: opts[i], fuzzy: texts[i] !== want };
+  }
+
+  function comboboxSelected(el) {
+    var box = el.closest('.ant-select,[class*="select"],[class*="picker"]') || el;
+    var items = box.querySelectorAll('.ant-select-selection-item,[class*="selection-item"]');
+    if (items.length) return norm(items[items.length - 1].textContent || '');
+    return norm(box.textContent || '');
+  }
+
+  /**
+   * 组合控件（antd Select / TreeSelect 等）异步填充：
+   * mousedown 打开 → 等选项加载（字典接口异步）→ 写搜索词过滤 → 点选最匹配项 → 校验。
+   * 值以 {value,label} 进 React 状态，无法同步确认，完成后 toast 结果；失败重试一次。
+   */
+  function fillCombobox(ctrl, value, attempt) {
+    attempt = attempt || 0;
+    var el = ctrl.el;
+    var want = norm(String(value));
+    try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* noop */ }
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    waitFor(function () { return comboboxOptions(el).length ? true : null; }, 5000)
+      .then(function () {
+        // 选项在 focus 时才异步拉取，等首批到位再写搜索词
+        var editable = !el.readOnly;
+        if (editable && want) setNativeValue(el, String(value));
+        return waitFor(function () { return pickIn(comboboxOptions(el), want); }, 5000);
+      })
+      .then(function (pick) {
+        if (!pick) {
+          var rest = comboboxOptions(el);
+          pick = rest.length ? { el: rest[0], fuzzy: true } : null;
+        }
+        if (pick && pick.el) pick.el.click();
+        else commitEnter(el); // 没等到选项：回车赌一把搜索直选
+        return waitFor(function () {
+          var cur = comboboxSelected(el);
+          return cur && (cur.indexOf(want) !== -1 || (want.indexOf(cur) !== -1 && cur.length >= 2)) ? cur : null;
+        }, 2000);
+      })
+      .then(function (ok) {
+        if (ok) {
+          FO.floatball.toast('已填入下拉：' + String(value).slice(0, 24));
+        } else if (attempt < 1) {
+          commitEscape(el);
+          setTimeout(function () { fillCombobox(ctrl, value, attempt + 1); }, 350);
+        } else {
+          FO.floatball.toast('下拉未能匹配：' + String(value).slice(0, 24) + '，请手动选择');
+        }
+      })
+      .catch(function () { FO.floatball.toast('下拉填充失败'); });
+  }
 
   function matchRadio(ctrl, value) {
     var group = ctrl.radioGroup && ctrl.radioGroup.length ? ctrl.radioGroup : [ctrl.el];

@@ -347,6 +347,19 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   });
 
+  // ---------- 视觉识别（截图 OCR 兜底） ----------
+  $('#ocr-scan').addEventListener('click', function () {
+    var btn = $('#ocr-scan');
+    btn.disabled = true;
+    $('#save-status').textContent = 'OCR 识别中…';
+    chrome.runtime.sendMessage({ type: 'FO_OCR_SCAN' }, function (r) {
+      void chrome.runtime.lastError;
+      btn.disabled = false;
+      $('#save-status').textContent = (r && r.ok) ? 'OCR 完成 ✓' : 'OCR 失败：' + ((r && r.error) || '未知错误');
+      setTimeout(function () { $('#save-status').textContent = '已保存'; }, 3000);
+    });
+  });
+
   // ---------- JSON 直编 ----------
   function refreshJsonEditor() {
     $('#json-editor').value = JSON.stringify(resume, null, 2);

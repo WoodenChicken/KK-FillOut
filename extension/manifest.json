@@ -29,6 +29,7 @@
         "utils/regions.js",
         "content/matcher.js",
         "content/scanner.js",
+        "content/ocr-assign.js",
         "content/filler.js",
         "content/highlight.js",
         "content/floatball.js",
@@ -39,8 +40,8 @@
       "all_frames": true
     }
   ],
-  "permissions": ["storage", "scripting", "sidePanel", "webNavigation", "contextMenus"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["storage", "scripting", "sidePanel", "webNavigation", "contextMenus", "offscreen"],
+  "host_permissions": ["<all_urls>"],
   "commands": {
     "toggle-ball": {
       "suggested_key": {

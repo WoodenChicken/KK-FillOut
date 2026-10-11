@@ -10,7 +10,7 @@
   var SELECTOR = [
     'input[type="text"]', 'input[type="tel"]', 'input[type="email"]', 'input[type="number"]',
     'input[type="date"]', 'input[type="month"]', 'input[type="radio"]', 'input[type="checkbox"]',
-    'input:not([type])', 'textarea', 'select',
+    'input:not([type])', 'input[type="search"][role="combobox"]', 'textarea', 'select',
     '[contenteditable="true"]', '[contenteditable=""]'
   ].join(',');
 
@@ -25,7 +25,11 @@
   }
 
   function isFillable(el) {
-    if (el.disabled || el.readOnly) return false;
+    // [role=combobox]：antd Select 等组件库的内部搜索框（type=search + readonly），
+    // 是「组合控件」的填写入口，不能因 readonly 被过滤；真 disabled 仍然排除。
+    var isWidget = el.getAttribute && el.getAttribute('role') === 'combobox';
+    if (el.disabled) return false;
+    if (!isWidget && el.readOnly) return false;
     var type = (el.getAttribute('type') || '').toLowerCase();
     if (['hidden', 'submit', 'button', 'image', 'reset', 'file', 'password'].indexOf(type) !== -1) return false;
     return true;
@@ -51,7 +55,9 @@
       });
     }
     // 4) 前置兄弟 / 表格单元格 / 前置文本
-    var sib = previousTextSibling(el, 3);
+    // 爬 12 层：antd Form.Item 等组件库会在输入框外裹 4~6 层包装 div，
+    // 标签 div（如光大站 .resume-form-title）在包装层之外，浅爬拿不到
+    var sib = previousTextSibling(el, 12);
     if (sib) parts.push(sib);
     var cell = el.closest && el.closest('td,th');
     if (cell) {
@@ -80,14 +86,13 @@
   function previousTextSibling(el, maxHops) {
     var n = el;
     for (var i = 0; i < maxHops && n; i++) {
-      var prev = i === 0 ? n.previousElementSibling : (n.parentElement ? n.parentElement.previousElementSibling : null);
       var probe = n.previousElementSibling;
       if (probe) {
         var t = (probe.textContent || '').trim();
-        if (t && probe.children.length === 0) return t.slice(0, 60);
+        // 兄弟无文本（图标/占位 span 等）时不钻进去，改爬父级，否则嵌套控件会原地打转
         if (t) return t.slice(0, 60);
       }
-      n = probe || n.parentElement;
+      n = n.parentElement;
     }
     return '';
   }
@@ -181,7 +186,14 @@
       documentOrder: 0
     };
     if (kind === 'radio' || kind === 'checkbox') {
-      ctrl.radioGroup = name ? (root || doc).querySelectorAll('input[type="' + kind + '"][name="' + cssEscape(name) + '"]') : [el];
+      // antd Radio/Checkbox 的 input 常没有 name 属性，按 name 分组会只剩自己一个；
+      // 此时退回按组容器（ant-radio-group / role=radiogroup 等）收集整组
+      var grp = name ? (root || doc).querySelectorAll('input[type="' + kind + '"][name="' + cssEscape(name) + '"]') : null;
+      if (!grp || grp.length <= 1) {
+        var groupBox = el.closest('[role="radiogroup"],[role="group"],.ant-radio-group,.ant-checkbox-group,[class*="radio-group"],[class*="checkbox-group"],fieldset');
+        if (groupBox) grp = groupBox.querySelectorAll('input[type="' + kind + '"]');
+      }
+      ctrl.radioGroup = grp && grp.length ? grp : [el];
     }
     return ctrl;
   };
@@ -208,6 +220,7 @@
     if (el.tagName === 'SELECT') return 'select';
     if (el.tagName === 'TEXTAREA') return 'textarea';
     if (el.getAttribute('contenteditable') !== null) return 'contenteditable';
+    if (el.getAttribute('role') === 'combobox') return 'combobox';
     var t = (el.getAttribute('type') || 'text').toLowerCase();
     if (t === 'radio') return 'radio';
     if (t === 'checkbox') return 'checkbox';

@@ -100,6 +100,28 @@
       fillField: function (ctrl, value) { return undefined; }
     },
     {
+      id: 'cebbank',
+      label: '光大银行网申',
+      match: function (url) { return /https?:\/\/eoap\.cebbank\.com/i.test(url); },
+      // 光大模板字段 id 形如 set_11-record_0-item_11_2，末尾 informationItemId 可强映射；
+      // 已知映射来自前端包校验逻辑（checkValue/validateStatus），其余字段走通用标签匹配
+      resolveKey: function (ctrl) {
+        var m = /item_(\d+)_(\d+)$/.exec((ctrl.el && ctrl.el.id) || '');
+        if (!m) return '';
+        var MAP = {
+          '11_2': 'basicInfo.name',
+          '11_20': 'basicInfo.gender',
+          '11_21': 'basicInfo.birthDate',
+          '11_29': 'basicInfo.idCard',
+          '11_100': 'basicInfo.idCard', // 身份证二次确认，填同一值
+          '11_36': 'basicInfo.phone',
+          '11_37': 'basicInfo.email',
+          '14_53': 'education.degree'
+        };
+        return MAP[m[1] + '_' + m[2]] || '';
+      }
+    },
+    {
       id: 'phoenix',
       label: 'Phoenix（海外校招）',
       match: function (url) { return /https?:\/\/([^/]*\.)?(phoenix|applyphoenix)[^/]*\.(com|org|io|net)/i.test(url) || /phoenix\.[a-z]+\/apply/i.test(url); },

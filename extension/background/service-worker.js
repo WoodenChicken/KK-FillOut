@@ -100,9 +100,85 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         (err) => sendResponse({ ok: false, error: String(err && err.message || err) })
       );
       return true;
+    case 'FO_OCR_SCAN':
+      ocrScan(sender && sender.tab).then(
+        () => sendResponse({ ok: true }),
+        (err) => sendResponse({ ok: false, error: String(err && err.message || err) })
+      );
+      return true;
   }
   // no async response needed
 });
+
+// ---------- 视觉识别（截图 OCR 兜底识别） ----------
+// 流程：内容脚本隐藏自家 UI → captureVisibleTab 截当前视口 → offscreen 页本地 OCR →
+//       行级文本+坐标发回内容脚本，按几何位置关联到附近控件。
+async function ocrScan(tab) {
+  if (!tab || !tab.id || tab.id < 0) {
+    const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    tab = t;
+  }
+  if (!tab || !tab.id || tab.id < 0) throw new Error('找不到活动标签页');
+  if (/^(chrome|edge|about|chrome-extension):/.test(tab.url || '')) throw new Error('此页面不支持识别');
+
+  const ack = await askTab(tab.id, { type: 'FO_OCR_PREPARE' }); // 隐藏悬浮球/角标，避免入镜
+  if (!ack || !ack.ok) throw new Error('页面未就绪（请刷新后重试）');
+  let dataUrl;
+  try {
+    await sleep(120); // 等 UI 隐藏后的重绘
+    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId || chrome.windows.WINDOW_ID_CURRENT, { format: 'png' });
+  } finally {
+    sendToTab(tab.id, { type: 'FO_OCR_RESTORE' });
+  }
+
+  await ensureOffscreen();
+  const res = await askOffscreen({ type: 'FO_OCR_RUN', dataUrl });
+  if (!res || !res.ok) throw new Error((res && res.error) || 'OCR 识别失败');
+  sendToTab(tab.id, { type: 'FO_OCR_RESULT', lines: res.lines, imgW: res.imgW, imgH: res.imgH, ms: res.ms });
+}
+
+function askTab(tabId, msg) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, msg, (r) => {
+        void chrome.runtime.lastError;
+        resolve(r || null);
+      });
+    } catch (e) { resolve(null); }
+  });
+}
+
+function askOffscreen(msg) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(msg, (r) => {
+        void chrome.runtime.lastError;
+        resolve(r || null);
+      });
+    } catch (e) { resolve(null); }
+  });
+}
+
+async function ensureOffscreen() {
+  let has = false;
+  try {
+    if (chrome.runtime.getContexts) {
+      const ctx = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+      has = !!(ctx && ctx.length);
+    } else {
+      has = chrome.offscreen.hasDocument();
+    }
+  } catch (e) { has = false; }
+  if (!has) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen/ocr.html',
+      reasons: ['DOM_SCRAPING'],
+      justification: '本地 OCR：识别页面截图中的表单标签（模型与代码均在扩展包内，无远程请求）'
+    });
+  }
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 async function injectML(tabId) {
   if (!tabId || tabId < 0) throw new Error('no tab');

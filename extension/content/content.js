@@ -186,7 +186,8 @@
       // 用户确认/修正即产生一条训练样本（本地，不上传）
       logSample(m);
       if (m.tier === 'confirm') { m.tier = 'auto'; m.score = Math.max(m.score, 0.9); render(); }
-      FO.floatball.toast('已填入：' + ((FO.fieldDef(m.key) || {}).label || m.key));
+      // combobox 等异步填充由 filler 完成后自行 toast，这里不重复提示
+      if (!r.async) FO.floatball.toast('已填入：' + ((FO.fieldDef(m.key) || {}).label || m.key));
     } else {
       FO.floatball.toast((r && r.message) || '填入失败');
     }
@@ -206,6 +207,41 @@
       }, function () { void chrome.runtime.lastError; });
     } catch (e) { /* 测试环境 */ }
   }
+
+  // ---------- 视觉识别（截图 OCR 兜底） ----------
+  // DOM 信号弱（组件库自绘表单、标签无 label 元素等）时的第二识别通道：
+  // 截当前视口 → offscreen 本地 OCR → 行级文本按几何位置关联到邻近控件 → 重跑匹配。
+  function applyOcr(payload) {
+    var lines = (payload && payload.lines) || [];
+    var imgW = (payload && payload.imgW) || 0;
+    if (!lines.length || !imgW) { FO.floatball.toast('视觉识别完成：页面上没有读到可用文字'); return; }
+    var cssLines = FO.ocr.scaleLines(lines, imgW, window.innerWidth);
+    var controls = FO.scanner.scan(document);
+    var adapter = state.adapter;
+    controls.forEach(function (c) { c.adapterKey = adapter && adapter.resolveKey ? (adapter.resolveKey(c) || '') : ''; });
+    var n = FO.ocr.assignLinesToControls(cssLines, controls, window.innerWidth);
+    if (!n) { FO.floatball.toast('视觉识别完成：未找到与表单控件相邻的标签'); return; }
+    state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, null);
+    state.matches.forEach(function (m) { m._resume = state.resume; });
+    if (!state.visible) { state.visible = true; FO.floatball.setVisible(true); FO.floatball.initPosition(); }
+    render();
+    FO.floatball.toast('视觉识别：' + n + ' 个控件关联到标签，命中 ' + state.matches.length + ' 个字段');
+  }
+
+  document.addEventListener('fo-ocr-scan', function () {
+    FO.floatball.setOcrBusy(true);
+    FO.floatball.toast('视觉识别中…（首次需加载 OCR 模型，约几秒）');
+    try {
+      chrome.runtime.sendMessage({ type: 'FO_OCR_SCAN' }, function (r) {
+        void chrome.runtime.lastError;
+        FO.floatball.setOcrBusy(false);
+        if (!r || !r.ok) FO.floatball.toast('视觉识别失败：' + ((r && r.error) || '未知错误'));
+      });
+    } catch (e) {
+      FO.floatball.setOcrBusy(false);
+      FO.floatball.toast('当前环境不支持视觉识别');
+    }
+  });
 
   // ---------- 悬浮球事件总线 ----------
   document.addEventListener('fo-fill-all', function () { fillAll(); });
@@ -287,7 +323,8 @@
       // 目标恰好是本页识别过的控件 → 记一条训练样本
       var m = state.matches.find(function (x) { return x.ctrl && x.ctrl.el === target.el; });
       if (m) logSample(m);
-      FO.floatball.toast('已填入：' + def.label + (segIdx ? '（第' + (segIdx + 1) + '条）' : '') + (r.fuzzy ? '（接近匹配，请核对）' : ''));
+      // combobox 等异步填充由 filler 完成后自行 toast
+      if (!r.async) FO.floatball.toast('已填入：' + def.label + (segIdx ? '（第' + (segIdx + 1) + '条）' : '') + (r.fuzzy ? '（接近匹配，请核对）' : ''));
     } else {
       FO.floatball.toast((r && r.message) || '填入失败');
     }
@@ -320,15 +357,25 @@
     }
   }, true);
 
-  // background：chrome.commands / 工具栏点击 / URL 变化
+  // background：chrome.commands / 工具栏点击 / URL 变化 / 视觉识别
   try {
-    chrome.runtime.onMessage.addListener(function (msg) {
+    chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       if (!msg) return;
       if (msg.type === 'FO_TOGGLE_BALL') toggleBall();
       else if (msg.type === 'FO_URL_CHANGED') scheduleRescan(500);
       else if (msg.type === 'FO_MENU_FILL') {
         if (!state.visible) { state.visible = true; FO.floatball.setVisible(true); FO.floatball.initPosition(); }
         setTimeout(fillAll, 200);
+      } else if (msg.type === 'FO_OCR_PREPARE') {
+        // 截图前隐藏自家 UI，避免悬浮球/角标入镜被 OCR 当成页面文本
+        state.ocrWasVisible = state.visible;
+        if (state.visible) FO.floatball.setVisible(false);
+        FO.highlight.clear();
+        sendResponse({ ok: true });
+      } else if (msg.type === 'FO_OCR_RESTORE') {
+        if (state.ocrWasVisible) { state.ocrWasVisible = false; FO.floatball.setVisible(true); }
+      } else if (msg.type === 'FO_OCR_RESULT') {
+        try { applyOcr(msg); } catch (e) { FO.floatball.toast('视觉识别处理失败：' + (e && e.message)); }
       }
     });
   } catch (e) { /* 测试环境 */ }

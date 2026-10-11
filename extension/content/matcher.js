@@ -16,7 +16,7 @@
     'basicInfo.birthDate': ['出生年月', '出生日期', '出生日期', '生日', '出生日期', 'date of birth', 'birthdate', 'birth date', 'birthday', '出生'],
     'basicInfo.ethnicity': ['民族', 'ethnicity', 'ethnic group'],
     'basicInfo.politicalStatus': ['政治面貌', '政治状态', 'political status', 'political'],
-    'basicInfo.nativePlace': ['籍贯', '户口所在地', '户籍所在地', '户籍地址', '户口地址', '户籍', ' hometown', 'birthplace'],
+    'basicInfo.nativePlace': ['籍贯', '户口所在地', '户籍所在地', '户籍地址', '户口地址', '户籍', '生源地区', ' hometown', 'birthplace'],
     'basicInfo.currentCity': ['现居地', '现居住地', '现居住城市', '现居城市', '居住地', '居住城市', '常住地', '常居地', '现住址', 'living city', 'current city', 'residence'],
     'basicInfo.phone': ['手机号码', '手机号', '手机', '联系电话', '联系方式', '电话号码', '电话', 'mobile phone', 'mobile', 'cellphone', 'phone number', 'phone', 'tel'],
     'basicInfo.email': ['电子邮箱', '电子邮件', '邮箱地址', '邮箱', 'e-mail', 'email address', 'email'],
@@ -25,7 +25,7 @@
     'basicInfo.weight': ['体重', 'weight'],
     'basicInfo.maritalStatus': ['婚姻状况', '婚姻', 'marital status', 'marital'],
     'basicInfo.jobIntention': ['求职意向', '意向岗位', '意向职位', '应聘岗位', '应聘职位', '期望职位', '期望岗位', '求职岗位', 'position applied', 'desired position', 'job intention', 'target position'],
-    'basicInfo.expectedSalary': ['期望薪资', '薪资要求', '期望月薪', '期望工资', '期望待遇', 'expected salary', 'salary expectation'],
+    'basicInfo.expectedSalary': ['期望薪资', '薪资要求', '期望月薪', '期望工资', '期望待遇', '期望年薪', 'expected salary', 'salary expectation'],
     'basicInfo.expectedCity': ['期望工作城市', '期望城市', '意向城市', '期望工作地点', '期望工作地', 'preferred city', 'expected city'],
     'basicInfo.availableDate': ['到岗时间', '可到岗时间', '预计到岗', '入职时间', 'available from', 'available date', 'onboard date'],
     'basicInfo.homeAddress': ['家庭住址', '家庭地址', '家庭所在地', '家庭详细地址', '通讯地址', '通信地址', '联系地址', '详细地址', '家庭', 'home address', 'address'],
@@ -97,6 +97,7 @@
       .replace(/\s+/g, ' ')
       .replace(/[：:：]/g, '')
       .replace(/（/g, '(').replace(/）/g, ')')
+      .replace(/^[*＊✱️\s]+/, '') // 必填星号常渲染在标签前（如 antd Form.Item 自绘标题）
       .replace(/[*＊✱️\s]+$/g, '')
       .trim();
   }
@@ -127,6 +128,7 @@
     labelText: 1.0,
     placeholder: 0.92,
     dataAttrs: 0.9,
+    ocrText: 0.9, // 视觉识别：OCR 出的邻近标签文本（几何分配，见 ocr-assign.js）
     name: 0.85,
     ariaLabel: 0.82,
     id: 0.78,

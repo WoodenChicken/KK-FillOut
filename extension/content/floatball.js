@@ -36,6 +36,7 @@
     '.btn-fill{background:#16a34a;color:#fff;} .btn-fill:hover{background:#15803d;}',
     '.btn-clear{background:#e2e8f0;color:#475569;} .btn-clear:hover{background:#cbd5e1;}',
     '.btn-edit{background:#2563eb;color:#fff;} .btn-edit:hover{background:#1d4ed8;}',
+    '.btn-ocr{background:#7c3aed;color:#fff;} .btn-ocr:hover{background:#6d28d9;} .btn-ocr:disabled{opacity:.6;cursor:wait;}',
     '.list{overflow-y:auto;padding:4px 8px 10px;}',
     '.grp{padding:9px 6px 3px;font-size:11px;color:#94a3b8;font-weight:700;letter-spacing:.06em;}',
     '.it{display:flex;align-items:center;gap:6px;padding:6px 6px;border-radius:8px;cursor:pointer;margin:0 2px;}',
@@ -80,6 +81,7 @@
       '<button class="btn-fill" id="fo-fill">⚡ 一键填充</button>' +
       '<button class="btn-clear" id="fo-clear">↩ 清空</button>' +
       '<button class="btn-edit" id="fo-edit">✎ 编辑简历</button>' +
+      '<button class="btn-ocr" id="fo-ocr" title="DOM 识别不到时：截图 + 本地 OCR，按位置把标签关联到控件">👁 视觉识别</button>' +
       '</div><div class="list" id="fo-list"></div>';
     shadow.appendChild(panel);
 
@@ -92,6 +94,7 @@
     panel.querySelector('#fo-fill').addEventListener('click', function () { emit('fo-fill-all'); });
     panel.querySelector('#fo-clear').addEventListener('click', function () { emit('fo-clear-all'); });
     panel.querySelector('#fo-edit').addEventListener('click', function () { emit('fo-open-editor'); });
+    panel.querySelector('#fo-ocr').addEventListener('click', function () { emit('fo-ocr-scan'); });
     applyPos();
     return true;
   }
@@ -268,6 +271,13 @@
   };
 
   FO.floatball.toast = function (msg) { if (ensure()) toast(msg); };
+
+  /** 视觉识别进行中：禁用按钮防止重复触发 */
+  FO.floatball.setOcrBusy = function (busy) {
+    if (!ensure()) return;
+    var btn = panel.querySelector('#fo-ocr');
+    if (btn) btn.disabled = !!busy;
+  };
 
   FO.floatball.setVisible = function (v) {
     visible = v;
