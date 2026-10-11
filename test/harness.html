@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>FillOut 引擎冒烟测试（无扩展环境的 iframe 隔离测试）</title>
+<style>
+  body { font: 13px/1.6 Consolas, Menlo, monospace; margin: 20px; }
+  #log { white-space: pre-wrap; background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 10px; min-height: 200px; }
+  .pass { color: #4ade80; }
+  .fail { color: #f87171; }
+  h3 { font-family: sans-serif; }
+</style>
+</head>
+<body>
+  <h3>FillOut 引擎冒烟测试</h3>
+  <div id="log">运行中…</div>
+  <iframe id="frm" src="fixtures/mock-form.html" style="width:900px;height:600px;border:1px solid #ccc"></iframe>
+
+  <!-- 与扩展内容脚本同源的引擎文件（顺序与 manifest 一致） -->
+  <script>window.__FO_IN_HARNESS__ = true;</script>
+  <script src="../extension/utils/schema.js"></script>
+  <script src="../extension/utils/regions.js"></script>
+  <script src="../extension/content/matcher.js"></script>
+  <script src="../extension/content/scanner.js"></script>
+  <script src="../extension/content/ocr-assign.js"></script>
+  <script src="../extension/content/filler.js"></script>
+  <script src="../extension/content/highlight.js"></script>
+  <script src="../extension/content/floatball.js"></script>
+  <script src="../extension/content/adapters.js"></script>
+  <script src="../extension/content/content.js"></script>
+
+  <script>
+    // ---- 测试用简历（模拟 chrome.storage.local 不可用时 content.js 的兜底数据源） ----
+    window.__FO_TEST_DATA__ = {
+      resume: {
+        basicInfo: {
+          name: '张三', gender: '男', birthDate: '1999-09', phone: '13812345678',
+          email: 'zhangsan@example.com', idCard: '330106199909011234',
+          height: '175', weight: '65', ethnicity: '汉族', politicalStatus: '共青团员',
+          nativePlace: '浙江省杭州市', currentCity: '浙江省杭州市西湖区',
+          jobIntention: '前端开发工程师', expectedSalary: '12-16K', availableDate: '随时到岗',
+          homeAddress: '浙江省杭州市西湖区文一路 1 号',
+          emergencyContactName: '张四', emergencyContactRelation: '父子', emergencyContactPhone: '13987654321'
+        },
+        family: [{ name: '张四', relation: '父亲', workUnit: '杭州市第一医院', jobTitle: '医生', phone: '13987654321' }],
+        education: [
+          { school: '浙江大学', degree: '本科', major: '计算机科学与技术', startDate: '2018-09', endDate: '2022-06', rank: '前10%' },
+          { school: '清华大学', degree: '硕士', major: '软件工程', startDate: '2022-09', endDate: '2025-01', rank: '' }
+        ],
+        internship: [{ company: '字节跳动', position: '前端实习生', description: '负责抖音 Web 端组件开发与性能优化。' }],
+        work: [],
+        project: [{ name: '校园二手交易平台', role: '前端负责人', techStack: 'Vue3, TypeScript', description: '从 0 到 1 搭建校园二手交易平台，日活 3000+。' }],
+        certificate: [{ name: '大学英语六级(CET-6)', date: '2020-12' }],
+        honor: [{ name: '国家奖学金', level: '国家级', date: '2021-10' }],
+        skills: { items: [{ name: 'JavaScript', level: '熟练' }], selfAssessment: '热爱编程，学习能力强，善于团队协作。' }
+      }
+    };
+  </script>
+
+  <script>
+    // ---- content.js 运行在 harness 顶层文档；这里改为驱动 iframe 里的表单 ----
+    const log = (msg, cls) => {
+      const el = document.getElementById('log');
+      const span = document.createElement('div');
+      if (cls) span.className = cls;
+      span.textContent = msg;
+      el.appendChild(span);
+      (window.__LINES__ = window.__LINES__ || []).push({ msg, pass: cls !== 'fail' });
+    };
+
+    // content.js 在顶层扫描的是 harness 自身文档；为测试引擎，直接对 iframe 文档跑 scan+match+fill
+    function runTests() {
+      const doc = document.getElementById('frm').contentDocument;
+      const win = document.getElementById('frm').contentWindow;
+      const FO = win.FO || window.FO;
+
+      // scanner/matcher 以 document 为参数，我们把 iframe 的 document 传进去即可
+      const resume = FO.normalizeResume(window.__FO_TEST_DATA__.resume);
+      const controls = FO.scanner.scan(doc);
+      log(`扫描到控件：${controls.length} 个`, controls.length > 20 ? 'pass' : 'fail');
+
+      const matches = FO.matcher.matchAll(controls, resume, FO.DEFAULT_SETTINGS, null);
+      log(`命中字段：${matches.length} 个`, matches.length > 20 ? 'pass' : 'fail');
+
+      const byKey = {};
+      matches.forEach(m => {
+        const sel = describe(m.ctrl.el);
+        (byKey[m.key] = byKey[m.key] || []).push(sel);
+      });
+      function describe(el) {
+        return (el.tagName.toLowerCase() +
+          (el.name ? `[name=${el.name}]` : '') +
+          (el.id ? `#${el.id}` : ''));
+      }
+
+      // ---- 关键断言：映射正确性 ----
+      const expects = [
+        ['basicInfo.name', 'input[name=username]'],
+        ['basicInfo.gender', 'select[name=sex]'],
+        ['basicInfo.phone', 'input[name=mobile]'],
+        ['basicInfo.email', 'input[name=email]'],
+        ['basicInfo.politicalStatus', 'select[name=political]'],
+        ['basicInfo.idCard', 'input[name=idcard]'],
+        ['basicInfo.height', 'input[name=height]'],
+        ['basicInfo.ethnicity', 'input[name=ethnic]'],
+        ['basicInfo.expectedSalary', 'select[name=salary]'],
+        ['basicInfo.homeAddress', 'input[name=homeaddr]'],
+        ['basicInfo.jobIntention', 'input[name=jobint]'],
+        ['basicInfo.emergencyContactName', 'input[name=ec_name]'],
+        ['basicInfo.emergencyContactRelation', 'input[name=ec_rel]'],
+        ['basicInfo.emergencyContactPhone', 'input[name=ec_phone]'],
+        ['education.school', 'input[name=school1]'],
+        ['education.major', 'input[name=major1]'],
+        ['internship.company', 'input[name=intern_co]'],
+        ['internship.position', 'input[name=intern_pos]'],
+        ['internship.description', 'textarea[name=intern_desc]'],
+        ['project.name', 'input[name=proj_name]'],
+        ['project.role', 'input[name=proj_role]'],
+        ['project.techStack', 'input[name=proj_stack]'],
+        ['skills.selfAssessment', 'textarea[name=self_eval]'],
+        ['family.name', 'input[name=fam_name]'],
+        ['family.workUnit', 'input[name=fam_unit]']
+      ];
+      let passN = 0, failN = 0;
+      expects.forEach(([key, sel]) => {
+        const hit = (byKey[key] || []).find(s => s.includes(sel));
+        if (hit) { passN++; log(`  ✓ ${sel} → ${key}`); }
+        else { failN++; log(`  ✗ ${sel} 未映射到 ${key}（实际：${JSON.stringify(byKey[key] || [])}）`, 'fail'); }
+      });
+      log(`映射断言：${passN}/${expects.length} 通过`, failN === 0 ? 'pass' : 'fail');
+
+      // ---- 分段断言：两个教育经历块 ----
+      const eduSegs = [...new Set(matches.filter(m => m.key === 'education.school').map(m => m.segmentIdx))].sort();
+      log(`education.school 分段：${JSON.stringify(eduSegs)}`,
+        eduSegs.length >= 2 ? 'pass' : 'fail');
+
+      // ---- 一键填充 ----
+      let fillOk = 0, fillFail = 0;
+      matches.forEach(m => {
+        if (m.tier !== 'auto') return;
+        const v = FO.getResumeValue(resume, m.key, m.segmentIdx);
+        if (!v) return;
+        const r = FO.filler.fillControl(m.ctrl, v, { key: m.key });
+        if (r && r.ok) fillOk++; else { fillFail++; log(`  ✗ 填充失败 ${describe(m.ctrl)} ← ${m.key}: ${r && r.message}`, 'fail'); }
+      });
+      log(`自动填充：成功 ${fillOk} 个 / 失败 ${fillFail} 个`, fillFail === 0 && fillOk > 15 ? 'pass' : 'fail');
+
+      // ---- 值断言 ----
+      const val = (sel) => { const el = doc.querySelector(sel); return el ? (el.value !== undefined ? el.value : el.textContent).trim() : '(不存在)'; };
+      const valueChecks = [
+        ['input[name=username]', '张三'],
+        ['input[name=mobile]', '13812345678'],
+        ['input[name=email]', 'zhangsan@example.com'],
+        ['select[name=sex]', '男'],
+        ['select[name=political]', '共青团员'],
+        ['select[name=salary]', '12-16K'],
+        ['input[name=height]', '175'],
+        ['input[name=ec_name]', '张四'],
+        ['input[name=school1]', '浙江大学'],
+        ['input[name=school2]', '清华大学'],
+        ['input[name=edu_start1]', '2018-09'],
+        ['input[name=intern_co]', '字节跳动'],
+        ['input[name=proj_stack]', 'Vue3, TypeScript']
+      ];
+      let vPass = 0, vFail = 0;
+      valueChecks.forEach(([sel, want]) => {
+        const got = val(sel);
+        if (got === want) { vPass++; log(`  ✓ ${sel} = "${got}"`); }
+        else { vFail++; log(`  ✗ ${sel} 期望 "${want}"，实际 "${got}"`, 'fail'); }
+      });
+      // 出生年月：占位符要求 YYYY年MM月
+      const birth = val('input[name=birthday]');
+      log(birth === '1999年09' ? '  ✓ 日期格式化 birth → 1999年09' : `  ✗ 日期格式化 birth = "${birth}"`,
+        birth === '1999年09' ? 'pass' : 'fail');
+      if (birth === '1999年09') vPass++; else vFail++;
+
+      // 级联：先给 cascade 的省 select 命中现居地 key，再走级联（市的选项可能异步加载，等重试完成）
+      const provSel = doc.querySelector('#casc-province');
+      const citySel = doc.querySelector('#casc-city');
+      setTimeout(() => {
+        const casCtrl = { el: provSel, kind: 'select', type: 'select', signals: {} };
+        const cas = FO.filler.findRegionCascade(provSel);
+        if (cas) {
+          const r = FO.filler.fillRegionCascade(cas, resume.basicInfo.currentCity);
+          const cityVal = citySel.value;
+          log(r.ok && cityVal ? '  ✓ 级联填充：' + provSel.value + ' / ' + cityVal
+            : '  ✗ 级联填充失败：' + r.message + ' city="' + cityVal + '"',
+            r.ok && cityVal ? 'pass' : 'fail');
+          if (r.ok && cityVal) vPass++; else vFail++;
+
+          // contenteditable
+          const rich = doc.querySelector('#rich');
+          const richOk = rich.textContent.trim().length > 0 && rich.textContent.trim() !== '请输入';
+          log(richOk ? '  ✓ contenteditable 已填充' : `  ✗ contenteditable = "${rich.textContent}"`, richOk ? 'pass' : 'fail');
+          if (richOk) vPass++; else vFail++;
+
+          // ---- 视觉识别（OCR 几何分配）：DOM 提取不到标签的控件，靠 OCR 行文本命中 ----
+          // 模拟组件库自绘表单：标签 span 在控件之后渲染、用 CSS 定位到上方（真实 antd 垂直表单形态），
+          // DOM 侧 previousTextSibling 拿不到它（ocrHost 置于 body 首位，向上爬无兄弟可借），
+          // 因此命中只能来自 ocrText 信号。
+          try {
+            const ocrHost = doc.createElement('div');
+            ocrHost.innerHTML = '<div style="position:relative;padding-top:24px">' +
+              '<input id="ocr-x1" type="text">' +
+              '<span id="ocr-lab" style="position:absolute;left:0;top:0">＊紧急联系人关系</span></div>';
+            // 屏障：爬升 12 层会到达 <head>（含 CSS 文本），先放一个无词典意义的文本兄弟拦住
+            const barrier = doc.createElement('div');
+            barrier.textContent = '.';
+            doc.body.appendChild(barrier);
+            doc.body.appendChild(ocrHost);
+            const lab = doc.querySelector('#ocr-lab');
+            const inp = doc.querySelector('#ocr-x1');
+            const ctrl2 = FO.scanner.describe(inp, doc);
+            const domLabel = ctrl2 ? ctrl2.signals.labelText : '(ctrl=null)';
+            const lr = lab.getBoundingClientRect(), ir = inp.getBoundingClientRect();
+            // 模拟 OCR 输出：行文本位于输入框上方（CSS 像素坐标）
+            const lines = [{ text: '＊紧急联系人关系', conf: 90, x0: lr.left, y0: lr.top, x1: lr.right, y1: lr.bottom }];
+            const got = FO.ocr.assignLinesToControls(lines, [ctrl2], win.innerWidth);
+            const ocrMatch = FO.matcher.matchAll([ctrl2], resume, FO.DEFAULT_SETTINGS, null)[0];
+            const ocrOk = got === 1 && domLabel.indexOf('紧急') === -1 && ocrMatch &&
+              ocrMatch.key === 'basicInfo.emergencyContactRelation' && ocrMatch.tier === 'auto';
+            log(ocrOk ? '  ✓ OCR 标签「＊紧急联系人关系」→ basicInfo.emergencyContactRelation（auto 档）'
+                : `  ✗ OCR 用例失败：assigned=${got} domLabel="${domLabel}" match=${ocrMatch && ocrMatch.key}@${ocrMatch && ocrMatch.score}`,
+              ocrOk ? 'pass' : 'fail');
+            if (ocrOk) vPass++; else vFail++;
+
+            // combobox（antd Select 内部搜索框）应被 scanner 识别且可走填充分支
+            const cbHost = doc.createElement('div');
+            cbHost.innerHTML = '<input type="search" role="combobox" readonly id="ocr-combo">';
+            doc.body.appendChild(cbHost);
+            const cbCtrl = FO.scanner.describe(doc.querySelector('#ocr-combo'), doc);
+            const cbOk = cbCtrl && cbCtrl.kind === 'combobox';
+            log(cbOk ? '  ✓ [role=combobox] 识别为组合控件（不再被 readonly 过滤）'
+                : '  ✗ [role=combobox] 未被识别', cbOk ? 'pass' : 'fail');
+            if (cbOk) vPass++; else vFail++;
+
+            // ---- 光大银行真实嵌套深度：标签 div 在 antd Form.Item 4 层包装之外 ----
+            // 结构复刻 eoap.cebbank.com：resume-form-title 是 ant-row(ant-form-item) 的前置兄弟，
+            // 输入框到标签需爬 5 层（旧代码 3 层拿不到 → 全站 0 命中）
+            const antdHost = doc.createElement('div');
+            antdHost.innerHTML =
+              '<div id="antd-item" class="resume-form-item">' +
+                '<div class="resume-form-title"><span>*</span>民族</div>' +
+                '<div class="ant-row ant-form-item">' +
+                  '<div class="ant-col ant-form-item-control">' +
+                    '<div class="ant-form-item-control-input">' +
+                      '<div class="ant-form-item-control-input-content">' +
+                        '<div class="field-item-wrap"><input id="antd-ethnic" type="text"></div>' +
+                      '</div>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            doc.body.appendChild(antdHost);
+            const aCtrl = FO.scanner.describe(doc.querySelector('#antd-ethnic'), doc);
+            const aLabel = aCtrl ? aCtrl.signals.labelText : '(ctrl=null)';
+            const aMatch = FO.matcher.matchAll([aCtrl], resume, FO.DEFAULT_SETTINGS, null)[0];
+            const antdOk = aLabel.indexOf('民族') !== -1 && aMatch &&
+              aMatch.key === 'basicInfo.ethnicity' && aMatch.tier === 'auto';
+            log(antdOk ? '  ✓ antd 深嵌套标签「*民族」→ basicInfo.ethnicity（auto 档）'
+                : `  ✗ antd 深嵌套失败：label="${aLabel}" match=${aMatch && aMatch.key}@${aMatch && aMatch.score}`,
+              antdOk ? 'pass' : 'fail');
+            if (antdOk) vPass++; else vFail++;
+
+            // ---- antd 无 name 的 Radio：按 .ant-radio-group 容器分组，按包装 label 文本点选 ----
+            const rgHost = doc.createElement('div');
+            rgHost.innerHTML = '<div class="ant-radio-group">' +
+              '<label class="ant-radio-wrapper"><span class="ant-radio"><input type="radio"></span><span>男</span></label>' +
+              '<label class="ant-radio-wrapper"><span class="ant-radio"><input type="radio"></span><span>女</span></label>' +
+              '</div>';
+            doc.body.appendChild(rgHost);
+            const rIns = doc.querySelectorAll('.ant-radio-wrapper input[type=radio]');
+            const rCtrl = FO.scanner.describe(rIns[0], doc);
+            const grpOk = rCtrl && rCtrl.radioGroup && rCtrl.radioGroup.length === 2;
+            let rfOk = false;
+            if (grpOk) {
+              const rr = FO.filler.fillControl(rCtrl, '女', {});
+              rfOk = rr.ok && rIns[1].checked && !rIns[0].checked;
+            }
+            log(grpOk && rfOk ? '  ✓ antd Radio 无 name 分组 → 填「女」点中第二项'
+                : `  ✗ antd Radio 失败：group=${rCtrl && rCtrl.radioGroup && rCtrl.radioGroup.length} fill=${rfOk}`,
+              grpOk && rfOk ? 'pass' : 'fail');
+            if (grpOk && rfOk) vPass++; else vFail++;
+
+            // ---- 组件库日期输入（无原生 type）：年月值自动补到日并标记 fuzzy ----
+            const dHost = doc.createElement('div');
+            dHost.innerHTML = '<input id="antd-birth" type="text" placeholder="请选择日期">';
+            doc.body.appendChild(dHost);
+            const dEl = doc.querySelector('#antd-birth');
+            const dCtrl = { el: dEl, kind: 'text', type: 'text', signals: { placeholder: '请选择日期', labelText: '出生日期', ocrText: '', name: '', id: 'antd-birth' } };
+            const dr = FO.filler.fillControl(dCtrl, '1999-09', { key: 'basicInfo.birthDate' });
+            const dOk = dr && dr.ok && dr.fuzzy && dEl.value === '1999-09-01';
+            log(dOk ? '  ✓ 组件日期输入 1999-09 → 1999-09-01（fuzzy 提示核对）'
+                : `  ✗ 日期补日失败：value="${dEl.value}" fuzzy=${dr && dr.fuzzy}`,
+              dOk ? 'pass' : 'fail');
+            if (dOk) vPass++; else vFail++;
+
+            antdHost.remove();
+            ocrHost.remove(); barrier.remove(); cbHost.remove(); rgHost.remove(); dHost.remove();
+          } catch (e) {
+            log('  ✗ OCR/combobox 用例异常：' + (e && e.message), 'fail');
+            vFail++;
+          }
+
+          log(`\n总计：通过 ${passN + vPass} / ${expects.length + valueChecks.length + 8}，失败 ${failN + vFail}`,
+            failN + vFail === 0 ? 'pass' : 'fail');
+          window.__TEST_DONE__ = true;
+          window.__TEST_SUMMARY__ = { pass: passN + vPass, fail: failN + vFail };
+        } else {
+          log('  ✗ 未识别到级联下拉', 'fail'); vFail++;
+          window.__TEST_DONE__ = true;
+          window.__TEST_SUMMARY__ = { pass: passN + vPass, fail: failN + vFail };
+        }
+      }, 1200);
+    }
+
+    window.addEventListener('load', () => setTimeout(runTests, 400));
+  </script>
+</body>
+</html>

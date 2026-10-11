@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>FillOut OCR 冒烟测试（离线资源 + 配置验证）</title>
+<style>
+  body { font: 13px/1.6 Consolas, Menlo, monospace; margin: 20px; background: #0f172a; color: #e2e8f0; }
+  #out { white-space: pre-wrap; }
+  canvas { border: 1px solid #475569; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h3 style="font-family:sans-serif">OCR 冒烟测试：canvas 表单标签 → Tesseract.js（本地 chi_sim+eng）</h3>
+  <canvas id="cv" width="640" height="120"></canvas>
+  <div id="out">初始化…</div>
+  <script src="../extension/vendor/ocr/tesseract.min.js"></script>
+  <script>
+    // 画一个模拟表单行：＊姓名：[输入框]，验证 OCR 能读出标签文本和坐标
+    // 画布不能太小（如 420x80），否则 PSM 自动分段可能返回空结果
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#111';
+    ctx.font = '34px "Microsoft YaHei", sans-serif';
+    ctx.fillText('＊姓名：', 12, 62);
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(160, 22, 260, 56); // 输入框
+    ctx.fillStyle = '#555';
+    ctx.font = '30px "Microsoft YaHei", sans-serif';
+    ctx.fillText('张三', 175, 62);
+
+    const out = document.getElementById('out');
+    const log = (m) => { out.textContent += '\n' + m; window.__OCR_STEP__ = m; };
+
+    (async () => {
+      try {
+        const t0 = performance.now();
+        // 与 offscreen/ocr.js 相同的配置形态：worker/core/lang 全部走同源本地路径（必须绝对 URL，
+        // worker 内部的相对 fetch 会以 worker 脚本位置为基准解析），workerBlobURL 关闭（MV3 CSP 兼容）
+        const abs = (p) => new URL(p, location.href).href;
+        const worker = await Tesseract.createWorker(['chi_sim', 'eng'], 1, {
+          workerPath: abs('../extension/vendor/ocr/worker.min.js'),
+          corePath: abs('../extension/vendor/ocr/'),
+          langPath: abs('../extension/vendor/ocr/langs'),
+          workerBlobURL: false,
+          lstmOnly: true,
+          cacheMethod: 'none',
+          logger: () => {}
+        });
+        log('worker 就绪 ' + Math.round(performance.now() - t0) + 'ms');
+        const ret = await worker.recognize(cv.toDataURL('image/png'), {}, { text: true, blocks: true });
+        const cost = Math.round(performance.now() - t0);
+        const lines = [];
+        (ret.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => {
+          if (l.text && l.text.trim()) lines.push({ text: l.text.trim(), bbox: l.bbox });
+        })));
+        const joined = lines.map(l => l.text).join(' | ');
+        log('识别耗时 ' + cost + 'ms');
+        log('行文本: ' + joined);
+        lines.forEach(l => log('  bbox: x=' + l.bbox.x0 + ' y=' + l.bbox.y1 + ' h=' + (l.bbox.y1 - l.bbox.y0) + ' ← ' + l.text));
+        const labelLine = lines.find(l => l.text.includes('姓名'));
+        window.__OCR_RESULT__ = {
+          ok: !!labelLine,
+          text: joined,
+          hasLabel: !!labelLine,
+          hasName: joined.includes('张三'),
+          hasBox: !!labelLine && !!labelLine.bbox && (labelLine.bbox.y1 - labelLine.bbox.y0) > 10,
+          lines
+        };
+        log(labelLine ? '✓ 通过：识别到标签「姓名」及坐标' : '✗ 失败：未识别到「姓名」');
+        window.__OCR_DONE__ = true;
+        await worker.terminate();
+      } catch (e) {
+        window.__OCR_RESULT__ = { ok: false, error: String(e && e.message || e) };
+        log('✗ 异常：' + (e && e.message || e));
+        window.__OCR_DONE__ = true;
+      }
+    })();
+  </script>
+</body>
+</html>

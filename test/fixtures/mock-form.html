@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>模拟校招投递表单（北森/Moka 混合风格）</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1f2937; }
+  h2 { margin: 24px 0 8px; font-size: 17px; }
+  fieldset { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  .row { display: flex; gap: 12px; margin-bottom: 10px; }
+  .item { flex: 1; display: flex; flex-direction: column; }
+  .item label { font-size: 12px; color: #6b7280; margin-bottom: 3px; }
+  input, select, textarea { padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 7px; font-size: 13px; }
+  .req::after { content: " *"; color: #ef4444; }
+  [data-field-name] { border-color: #93c5fd; }
+</style>
+</head>
+<body>
+  <h1>XX 科技有限公司 · 校园招聘报名表</h1>
+  <p>以下表单模拟国内 ATS（北森/Moka 混合风格）的分步投递页。</p>
+
+  <h2>基本信息</h2>
+  <fieldset>
+    <div class="row">
+      <div class="item"><label class="req">姓名</label><input type="text" name="username" placeholder="请输入您的姓名" /></div>
+      <div class="item"><label class="req">性别</label>
+        <select id="gender" name="sex"><option value="">请选择</option><option>男</option><option>女</option></select></div>
+      <div class="item"><label class="req">出生年月</label><input type="text" name="birthday" placeholder="格式：YYYY年MM月" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label class="req">手机号码</label><input type="tel" name="mobile" placeholder="请输入11位手机号" /></div>
+      <div class="item"><label class="req">电子邮箱</label><input type="email" name="email" placeholder="name@example.com" /></div>
+      <div class="item"><label>政治面貌</label>
+        <select id="political" name="political"><option value="">请选择</option><option>中共党员</option><option>共青团员</option><option>群众</option><option>民主党派</option></select></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>身份证号码</label><input type="text" name="idcard" placeholder="18位" /></div>
+      <div class="item"><label>身高(cm)</label><input type="number" name="height" /></div>
+      <div class="item"><label>体重(kg)</label><input type="number" name="weight" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>民族</label><input type="text" name="ethnic" /></div>
+      <div class="item"><label>婚姻状况</label>
+        <select id="marriage" name="marriage"><option value="">请选择</option><option>未婚</option><option>已婚</option></select></div>
+      <div class="item"><label>籍贯</label><input type="text" name="jiguan" placeholder="如：浙江省杭州市" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>现居住地</label><input type="text" name="living" placeholder="如：浙江省杭州市西湖区" /></div>
+      <div class="item"><label>期望薪资</label>
+        <select id="salary" name="salary"><option value="">请选择</option><option>8-12K</option><option>12-16K</option><option>16-20K</option><option>20K以上</option></select></div>
+      <div class="item"><label>到岗时间</label>
+        <select id="onboard" name="onboard"><option value="">请选择</option><option>随时到岗</option><option>一周内</option><option>一月内</option></select></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>家庭住址</label><input type="text" name="homeaddr" /></div>
+      <div class="item"><label>求职意向</label><input type="text" name="jobint" placeholder="期望岗位" /></div>
+    </div>
+  </fieldset>
+
+  <h2>紧急联系人</h2>
+  <fieldset>
+    <div class="row">
+      <div class="item"><label>紧急联系人姓名</label><input type="text" name="ec_name" /></div>
+      <div class="item"><label>与紧急联系人关系</label><input type="text" name="ec_rel" /></div>
+      <div class="item"><label>紧急联系人电话</label><input type="tel" name="ec_phone" /></div>
+    </div>
+  </fieldset>
+
+  <h2>教育经历</h2>
+  <fieldset>
+    <legend>教育经历 1</legend>
+    <div class="row">
+      <div class="item"><label class="req">毕业院校</label><input type="text" name="school1" data-field-name="school" /></div>
+      <div class="item"><label>学历</label>
+        <select name="degree1"><option value="">请选择</option><option>博士</option><option>硕士</option><option>本科</option><option>专科</option></select></div>
+      <div class="item"><label>专业</label><input type="text" name="major1" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>入学时间</label><input type="text" name="edu_start1" placeholder="YYYY-MM" /></div>
+      <div class="item"><label>毕业时间</label><input type="text" name="edu_end1" placeholder="YYYY-MM" /></div>
+      <div class="item"><label>专业排名</label><input type="text" name="rank1" /></div>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>教育经历 2</legend>
+    <div class="row">
+      <div class="item"><label class="req">毕业院校</label><input type="text" name="school2" data-field-name="school" /></div>
+      <div class="item"><label>学历</label>
+        <select name="degree2"><option value="">请选择</option><option>博士</option><option>硕士</option><option>本科</option><option>专科</option></select></div>
+      <div class="item"><label>专业</label><input type="text" name="major2" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>入学时间</label><input type="text" name="edu_start2" placeholder="YYYY-MM" /></div>
+      <div class="item"><label>毕业时间</label><input type="text" name="edu_end2" placeholder="YYYY-MM" /></div>
+    </div>
+  </fieldset>
+
+  <h2>实习 / 项目经历</h2>
+  <fieldset>
+    <legend>实习经历</legend>
+    <div class="row">
+      <div class="item"><label>实习公司</label><input type="text" name="intern_co" /></div>
+      <div class="item"><label>实习岗位</label><input type="text" name="intern_pos" /></div>
+    </div>
+    <div class="item" style="margin-bottom:10px"><label>实习内容</label><textarea name="intern_desc" rows="3"></textarea></div>
+  </fieldset>
+  <fieldset>
+    <legend>项目经历</legend>
+    <div class="row">
+      <div class="item"><label>项目名称</label><input type="text" name="proj_name" /></div>
+      <div class="item"><label>担任角色</label><input type="text" name="proj_role" /></div>
+      <div class="item"><label>技术栈</label><input type="text" name="proj_stack" /></div>
+    </div>
+    <div class="item" style="margin-bottom:10px"><label>项目描述</label><textarea name="proj_desc" rows="3"></textarea></div>
+  </fieldset>
+
+  <h2>其他</h2>
+  <fieldset>
+    <div class="item" style="margin-bottom:10px"><label>自我评价</label><textarea name="self_eval" rows="4"></textarea></div>
+    <div class="row">
+      <div class="item"><label>家庭成员姓名</label><input type="text" name="fam_name" /></div>
+      <div class="item"><label>家庭成员工作单位</label><input type="text" name="fam_unit" /></div>
+      <div class="item"><label>家庭成员电话</label><input type="tel" name="fam_phone" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>特长描述（富文本）</label>
+        <div id="rich" contenteditable="true" style="border:1px solid #d1d5db;border-radius:7px;min-height:44px;padding:8px;color:#9ca3af">请输入</div></div>
+    </div>
+  </fieldset>
+
+  <!-- 级联行政区划 -->
+  <h2>工作意向地（级联下拉）</h2>
+  <fieldset>
+    <div class="row">
+      <div class="item"><label>意向省份</label>
+        <select id="casc-province"><option value="">请选择省份</option></select></div>
+      <div class="item"><label>意向城市</label>
+        <select id="casc-city"><option value="">请先选择省份</option></select></div>
+    </div>
+  </fieldset>
+
+  <script>
+    // 模拟站点级联行为：省变化 → 城市选项异步刷新
+    (function () {
+      var DATA = {
+        '浙江省': ['杭州市', '宁波市', '温州市'],
+        '广东省': ['广州市', '深圳市', '珠海市'],
+        '江苏省': ['南京市', '苏州市', '无锡市'],
+        '北京市': ['东城区', '海淀区', '朝阳区']
+      };
+      var p = document.getElementById('casc-province');
+      var c = document.getElementById('casc-city');
+      Object.keys(DATA).forEach(function (k) {
+        var o = document.createElement('option'); o.value = k; o.textContent = k; p.appendChild(o);
+      });
+      p.addEventListener('change', function () {
+        c.innerHTML = '<option value="">请选择城市</option>';
+        (DATA[p.value] || []).forEach(function (city) {
+          var o = document.createElement('option'); o.value = city; o.textContent = city; c.appendChild(o);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
