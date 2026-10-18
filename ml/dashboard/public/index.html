@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FillOut 训练可视化面板</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">FO</div>
+      <div>
+        <h1>FillOut 训练可视化面板</h1>
+        <p class="subtitle">字段分类模型 · 全流程可视化</p>
+      </div>
+    </div>
+    <div class="actions">
+      <span id="status-dot" class="status-dot idle" title="空闲"></span>
+      <span id="status-text" class="status-text">空闲</span>
+      <button id="btn-stop" class="btn-danger" disabled>停止训练</button>
+      <button id="btn-start" class="btn-primary">开始训练</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="corpus">① 喂入语料</button>
+    <button class="tab" data-tab="cleaning">② 数据清洗</button>
+    <button class="tab" data-tab="training">③ 训练过程</button>
+    <button class="tab" data-tab="tuning">④ 参数调优</button>
+  </nav>
+
+  <main class="content">
+    <!-- 语料 -->
+    <section id="tab-corpus" class="pane active">
+      <div class="grid">
+        <div class="card">
+          <h3>语料概览</h3>
+          <div class="stats-row" id="corpus-stats">
+            <div class="stat"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">总样本数</div></div>
+            <div class="stat"><div class="stat-val" id="stat-synthetic">—</div><div class="stat-lbl">合成样本</div></div>
+            <div class="stat"><div class="stat-val" id="stat-real">—</div><div class="stat-lbl">真实样本</div></div>
+            <div class="stat"><div class="stat-val" id="stat-classes">—</div><div class="stat-lbl">类别数</div></div>
+          </div>
+        </div>
+        <div class="card span-2">
+          <h3>类别分布</h3>
+          <canvas id="chart-dist" height="220"></canvas>
+        </div>
+        <div class="card span-2">
+          <h3>样本抽样（前 30 条）</h3>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>文本</th><th>类别</th></tr></thead>
+              <tbody id="sample-tbody"><tr><td colspan="2" class="muted">等待训练启动…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 清洗 -->
+    <section id="tab-cleaning" class="pane">
+      <div class="grid">
+        <div class="card span-3">
+          <h3>清洗流水线</h3>
+          <div id="cleaning-flow" class="cleaning-flow"><p class="muted">等待训练启动…</p></div>
+        </div>
+        <div class="card span-3">
+          <h3>清洗前后对比</h3>
+          <div id="cleaning-before-after" class="before-after"><p class="muted">等待训练启动…</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 训练 -->
+    <section id="tab-training" class="pane">
+      <div class="grid">
+        <div class="card">
+          <h3>训练配置</h3>
+          <div id="model-info" class="model-info"><p class="muted">等待训练启动…</p></div>
+        </div>
+        <div class="card span-2">
+          <h3>实时日志</h3>
+          <div id="log-area" class="log-area"></div>
+        </div>
+        <div class="card span-3">
+          <h3>训练曲线（Loss &amp; Accuracy）</h3>
+          <canvas id="chart-train" height="260"></canvas>
+        </div>
+        <div class="card">
+          <h3>当前轮次</h3>
+          <div class="stat big"><div class="stat-val" id="stat-epoch">0 / 0</div><div class="stat-lbl">Epoch</div></div>
+          <div class="stat"><div class="stat-val" id="stat-acc">—</div><div class="stat-lbl">训练准确率</div></div>
+          <div class="stat"><div class="stat-val" id="stat-valacc">—</div><div class="stat-lbl">验证准确率</div></div>
+          <div class="stat"><div class="stat-val" id="stat-loss">—</div><div class="stat-lbl">Loss</div></div>
+        </div>
+        <div class="card span-2">
+          <h3>验证集评估</h3>
+          <div id="eval-result" class="eval-result"><p class="muted">等待评估…</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 参数调优 -->
+    <section id="tab-tuning" class="pane">
+      <div class="grid">
+        <div class="card span-3">
+          <h3>超参数配置</h3>
+          <p class="hint">调整参数后点「开始训练」即可生效。训练过程中可随时点「停止训练」。</p>
+          <div class="form-grid">
+            <label>随机种子 seed<input type="number" id="cfg-seed" value="42" /></label>
+            <label>每 pattern 样本数<input type="number" id="cfg-samples" value="6" min="1" /></label>
+            <label>词表大小 vocab<input type="number" id="cfg-vocab" value="3000" min="100" /></label>
+            <label>隐层神经元 hidden<input type="number" id="cfg-hidden" value="128" min="8" /></label>
+            <label>训练轮数 epochs<input type="number" id="cfg-epochs" value="30" min="1" /></label>
+            <label>批大小 batch<input type="number" id="cfg-batch" value="64" min="1" /></label>
+            <label>学习率 lr<input type="number" id="cfg-lr" value="0.005" step="0.001" min="0" /></label>
+            <label>Dropout<input type="number" id="cfg-dropout" value="0.15" step="0.05" min="0" max="0.9" /></label>
+            <label>验证集比例<input type="number" id="cfg-val" value="0.15" step="0.05" min="0.05" max="0.5" /></label>
+          </div>
+          <div class="tuning-actions">
+            <button id="btn-apply" class="btn-primary">应用并开始训练</button>
+            <button id="btn-reset" class="btn-ghost">恢复默认</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

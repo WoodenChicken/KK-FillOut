@@ -22,32 +22,37 @@
 
   function norm(s) { return FO.matcher.norm(s); }
 
-  /** 按站点习惯格式化日期值 */
+  /** 按站点习惯格式化日期值，统一输出 YYYY-MM-DD */
   function formatDateValue(iso, ctrl) {
     if (!iso) return '';
     var m = String(iso).match(/^(\d{4})(?:[-/.年](\d{1,2}))?(?:[-/.月](\d{1,2}))?/);
     if (!m) return String(iso);
     var y = m[1], mo = m[2] || '', d = m[3] || '';
+    var day = d ? pad(d) : '01';
     var hints = norm([ctrl.signals.placeholder, ctrl.signals.labelText, ctrl.signals.name, ctrl.signals.id].join(' '));
-    if (ctrl.type === 'date') return y + '-' + pad(mo) + (d ? '-' + pad(d) : '-01');
-    if (ctrl.type === 'month') return y + '-' + (pad(mo) || '01');
+    if (ctrl.type === 'date') return y + '-' + pad(mo) + '-' + day;
+    if (ctrl.type === 'month') return y + '-' + pad(mo);
     if (/[\u4e00-\u9fa5]年|yyyy年/.test(hints)) {
-      return mo ? (y + '年' + pad(mo) + (d ? '月' + pad(d) : '')) : y + '年';
+      return mo ? (y + '年' + pad(mo) + '月' + day + '日') : y + '年';
     }
-    if (/yyyy\/mm/.test(hints)) return y + '/' + (pad(mo) || '01');
-    return iso; // 默认 ISO：YYYY-MM / YYYY-MM-DD
+    if (/yyyy\/mm/.test(hints)) return y + '/' + pad(mo) + '/' + day;
+    return y + '-' + pad(mo) + '-' + day;
   }
 
   function pad(n) { n = String(n || ''); return n.length === 1 ? '0' + n : n; }
 
-  /** select 选项匹配：文本 → value → 包含 → 归一化包含 */
-  function pickOption(select, value) {
+  /** select 选项匹配：文本 → value → 包含 → 归一化包含，支持别名映射 */
+  function pickOption(select, value, key) {
     var want = norm(value);
     if (!want) return null;
+    var aliases = valueAliases(key || '', value);
     var opts = Array.prototype.slice.call(select.options || []);
     var v;
-    v = opts.find(function (o) { return norm(o.text) === want; }) ||
-      opts.find(function (o) { return norm(o.value) === want; });
+    v = opts.find(function (o) { return aliases.some(function (a) { return norm(o.text) === a || norm(o.value) === a; }); });
+    if (!v) {
+      v = opts.find(function (o) { return norm(o.text) === want; }) ||
+        opts.find(function (o) { return norm(o.value) === want; });
+    }
     if (v) return { opt: v, fuzzy: false };
     // 去掉"请选择"类占位项再做包含匹配
     var real = opts.filter(function (o) { return !/^(请选择|请选择|select|choose|-{2,}|全部|不限)$/.test(norm(o.text)); });
@@ -122,7 +127,7 @@
           break;
         }
         case 'select': {
-          var pick = pickOption(el, value);
+          var pick = pickOption(el, value, opts.key);
           if (!pick) {
             result.message = '下拉项无匹配：' + String(value).slice(0, 20);
             return result;
@@ -136,6 +141,7 @@
           break;
         }
         case 'radio': {
+          ctrl._matchKey = opts.key || ctrl._matchKey;
           var hit = matchRadio(ctrl, value);
           if (!hit) { result.message = '单选项无匹配：' + String(value).slice(0, 20); return result; }
           undoPush(hit);
@@ -145,6 +151,7 @@
         }
         case 'checkbox': {
           // 多选组：按文本点选匹配项；单独勾选框（协议/同意）一律不碰
+          ctrl._matchKey = opts.key || ctrl._matchKey;
           var hit2 = matchRadio(ctrl, value);
           if (!hit2) { result.message = '勾选项无匹配'; return result; }
           undoPush(hit2);
@@ -201,18 +208,32 @@
   }
 
   /** 当前 combobox 输入框对应的下拉选项：优先 aria-controls 精确定位，退回最后一个可见下拉。
-   *  覆盖 antd Select（option）与 TreeSelect/Cascader（tree 节点）；虚拟列表只看已渲染的可见项。 */
+   *  覆盖 antd Select（option）、Phoenix Select、TreeSelect/Cascader（tree 节点）；虚拟列表只看已渲染的可见项。 */
   function comboboxOptions(el) {
     var listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
     var root = listId ? document.getElementById(listId) : null;
     if (!root) {
-      var dds = document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden), [class*="select-dropdown"]:not([class*="dropdown-hidden"])');
+      // 兼容 antd / Phoenix / Element / Vant 等组件库的下拉面板
+      var dds = document.querySelectorAll(
+        '.ant-select-dropdown:not(.ant-select-dropdown-hidden),' +
+        '[class*="select-dropdown"]:not([class*="dropdown-hidden"]),' +
+        '[class*="select-popup"]:not([class*="popup-hidden"]),' +
+        '[class*="phoenix-select"]:not([class*="hidden"]),' +
+        '[class*="phoenix-popup"]:not([class*="hidden"]),' +
+        '.el-select-dropdown:not(.is-hidden),' +
+        '[class*="van-popup"]:not([class*="hidden"])'
+      );
       for (var i = dds.length - 1; i >= 0; i--) {
         if (dds[i].getClientRects().length) { root = dds[i]; break; }
       }
     }
     if (!root) return [];
-    var nodes = root.querySelectorAll('.ant-select-item-option,[role="option"],.ant-select-tree-treenode,[role="treeitem"]');
+    // 兼容多种组件库的选项元素
+    var nodes = root.querySelectorAll(
+      '.ant-select-item-option,[role="option"],.ant-select-tree-treenode,[role="treeitem"],' +
+      '[class*="select-option"],[class*="select-item"],[class*="option-item"],' +
+      'li'
+    );
     return Array.prototype.filter.call(nodes, function (n) { return n.getClientRects().length > 0; });
   }
 
@@ -232,6 +253,8 @@
   }
 
   function comboboxSelected(el) {
+    // Phoenix: 选中值直接在 input.value 里
+    if (el.value) return norm(el.value);
     var box = el.closest('.ant-select,[class*="select"],[class*="picker"]') || el;
     var items = box.querySelectorAll('.ant-select-selection-item,[class*="selection-item"]');
     if (items.length) return norm(items[items.length - 1].textContent || '');
@@ -239,15 +262,18 @@
   }
 
   /**
-   * 组合控件（antd Select / TreeSelect 等）异步填充：
-   * mousedown 打开 → 等选项加载（字典接口异步）→ 写搜索词过滤 → 点选最匹配项 → 校验。
-   * 值以 {value,label} 进 React 状态，无法同步确认，完成后 toast 结果；失败重试一次。
+   * 组合控件（antd Select / Phoenix Select / TreeSelect 等）异步填充：
+   * click 打开 → 等选项加载（字典接口异步）→ 写搜索词过滤（若可编辑）→ 点选最匹配项 → 校验。
+   * 值以 {value,label} 进组件状态，无法同步确认，完成后 toast 结果；失败重试一次。
    */
   function fillCombobox(ctrl, value, attempt) {
     attempt = attempt || 0;
     var el = ctrl.el;
     var want = norm(String(value));
+    var key = ctrl._matchKey || '';
     try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* noop */ }
+    // Phoenix 等组件用 click 打开下拉；antd 用 mousedown
+    el.click();
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     waitFor(function () { return comboboxOptions(el).length ? true : null; }, 5000)
@@ -255,7 +281,7 @@
         // 选项在 focus 时才异步拉取，等首批到位再写搜索词
         var editable = !el.readOnly;
         if (editable && want) setNativeValue(el, String(value));
-        return waitFor(function () { return pickIn(comboboxOptions(el), want); }, 5000);
+        return waitFor(function () { return pickInWithAlias(comboboxOptions(el), want, key); }, 5000);
       })
       .then(function (pick) {
         if (!pick) {
@@ -282,9 +308,89 @@
       .catch(function () { FO.floatball.toast('下拉填充失败'); });
   }
 
+  /** 带别名映射的选项匹配 */
+  function pickInWithAlias(opts, want, key) {
+    if (!opts.length) return null;
+    var aliases = valueAliases(key || '', want);
+    var texts = opts.map(function (o) { return optionText(o); });
+    // 1) 别名全等
+    var i = texts.findIndex(function (t) { return aliases.indexOf(t) !== -1; });
+    // 2) 原始值全等
+    if (i === -1) i = texts.findIndex(function (t) { return t === want; });
+    // 3) 别名包含
+    if (i === -1) i = texts.findIndex(function (t) { return t && aliases.some(function (a) { return t.indexOf(a) !== -1 || a.indexOf(t) !== -1; }); });
+    // 4) 原始值包含
+    if (i === -1) i = texts.findIndex(function (t) { return t && t.indexOf(want) !== -1; });
+    if (i === -1) i = texts.findIndex(function (t) { return t && want.indexOf(t) !== -1 && t.length >= 2; });
+    return i === -1 ? null : { el: opts[i], fuzzy: texts[i] !== want };
+  }
+
+  /** 常见字段的值别名映射：简历里的中文值 ↔ 网页 radio/select 的 value/label */
+  var VALUE_ALIASES = {
+    'basicInfo.gender': {
+      '男': ['男', 'male', 'm', '1', '先生'],
+      '女': ['女', 'female', 'f', '2', '女士']
+    },
+    'basicInfo.maritalStatus': {
+      '未婚': ['未婚', 'single', 'unmarried', '1'],
+      '已婚': ['已婚', 'married', '2'],
+      '保密': ['保密', 'secret', '3']
+    },
+    'basicInfo.educationDegree': {
+      '博士': ['博士', '博士研究生', 'phd', 'doctor', 'doctorate', '1'],
+      '硕士': ['硕士', '硕士研究生', '研究生', 'master', 'msc', 'ma', '2'],
+      '本科': ['本科', '学士', '大学本科', 'bachelor', 'bs', 'ba', 'university', '3'],
+      '专科': ['专科', '大专', '高职专科', 'college', 'associate', '4'],
+      '高中': ['高中', '普通高中', 'high school', 'senior high', '5'],
+      '中专': ['中专', '中职', 'secondary specialized', '6'],
+      '初中': ['初中', 'junior high', '7'],
+      '其他': ['其他', 'other', '9']
+    },
+    'basicInfo.studyForm': {
+      '全日制': ['全日制', '普通全日制', '统招', 'full-time', 'full time', '1'],
+      '非全日制': ['非全日制', '在职', 'part-time', 'part time', '2'],
+      '自考': ['自考', '自学考试', 'self-taught', 'self taught', '3'],
+      '成人高考': ['成人高考', '成考', 'adult', '4'],
+      '网络教育': ['网络教育', '远程教育', 'online', 'distance', '5'],
+      '开放大学': ['开放大学', '电大', 'open university', '6'],
+      '其他': ['其他', 'other', '9']
+    },
+    'basicInfo.healthStatus': {
+      '良好': ['良好', '健康', 'good', 'healthy', '1', '良好及以上'],
+      '一般': ['一般', '一般健康', 'fair', 'average', '2', 'normal'],
+      '较差': ['较差', 'poor', '3', 'bad', '一般以下']
+    },
+    'basicInfo.politicalStatus': {
+      '中共党员': ['中共党员', '党员', 'communist', 'cpc', '1'],
+      '中共预备党员': ['中共预备党员', '预备党员', 'probationary', '2'],
+      '共青团员': ['共青团员', '团员', 'youth league', '3'],
+      '民主党派': ['民主党派', 'democratic party', '4'],
+      '群众': ['群众', 'masses', '5', '群众'],
+      '无党派人士': ['无党派人士', 'non-party', '6']
+    }
+  };
+
+  /** 获取某字段某值的所有别名（含自身归一化） */
+  function valueAliases(key, value) {
+    var want = norm(value);
+    var aliases = [want];
+    var map = VALUE_ALIASES[key];
+    if (map) {
+      Object.keys(map).forEach(function (canonical) {
+        var arr = map[canonical];
+        if (canonical === value || arr.indexOf(want) !== -1) {
+          arr.forEach(function (a) { aliases.push(norm(a)); });
+          aliases.push(norm(canonical));
+        }
+      });
+    }
+    return aliases.filter(function (a, i) { return a && aliases.indexOf(a) === i; });
+  }
+
   function matchRadio(ctrl, value) {
     var group = ctrl.radioGroup && ctrl.radioGroup.length ? ctrl.radioGroup : [ctrl.el];
     var want = norm(value);
+    var aliases = valueAliases(ctrl._matchKey || '', value);
     var scope = radioGroupValue(ctrl.el) || document;
     var nodes = Array.prototype.slice.call(group);
     function labelOf(input) {
@@ -301,7 +407,12 @@
       }
       return norm(input.value);
     }
-    var hit = nodes.find(function (n) { return norm(n.value) === want; }) ||
+    var hit = nodes.find(function (n) {
+      var lv = norm(n.value);
+      var lb = labelOf(n);
+      return aliases.some(function (a) { return lv === a || lb === a; });
+    }) ||
+      nodes.find(function (n) { return norm(n.value) === want; }) ||
       nodes.find(function (n) { return labelOf(n) === want; }) ||
       nodes.find(function (n) { var l = labelOf(n); return l && (l.indexOf(want) !== -1 || want.indexOf(l) !== -1) && l.length >= 1; });
     return hit || null;

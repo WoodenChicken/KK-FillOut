@@ -26,7 +26,7 @@
       <div class="item"><label class="req">姓名</label><input type="text" name="username" placeholder="请输入您的姓名" /></div>
       <div class="item"><label class="req">性别</label>
         <select id="gender" name="sex"><option value="">请选择</option><option>男</option><option>女</option></select></div>
-      <div class="item"><label class="req">出生年月</label><input type="text" name="birthday" placeholder="格式：YYYY年MM月" /></div>
+      <div class="item"><label class="req">出生日期</label><input type="date" name="birthday" /></div>
     </div>
     <div class="row">
       <div class="item"><label class="req">手机号码</label><input type="tel" name="mobile" placeholder="请输入11位手机号" /></div>
@@ -46,7 +46,23 @@
       <div class="item"><label>籍贯</label><input type="text" name="jiguan" placeholder="如：浙江省杭州市" /></div>
     </div>
     <div class="row">
+      <div class="item"><label>最高学历</label>
+        <select name="edu_degree"><option value="">请选择</option><option>博士</option><option>硕士</option><option>本科</option><option>专科</option><option>高中</option></select></div>
+      <div class="item"><label>学习形式</label>
+        <select name="study_form"><option value="">请选择</option><option>全日制</option><option>非全日制</option><option>自考</option><option>网络教育</option></select></div>
+      <div class="item"><label>国籍</label><input type="text" name="nationality" placeholder="如：中国" /></div>
+    </div>
+    <div class="row">
+      <div class="item"><label>健康状况</label>
+        <select name="health"><option value="">请选择</option><option>良好</option><option>一般</option><option>较差</option></select></div>
+      <div class="item"><label>生源地</label><input type="text" name="student_origin" placeholder="如：浙江省杭州市" /></div>
       <div class="item"><label>现居住地</label><input type="text" name="living" placeholder="如：浙江省杭州市西湖区" /></div>
+    </div>
+    <div class="row">
+      <div class="item" style="flex:2"><label>兴趣爱好</label><input type="text" name="hobbies" placeholder="如：阅读、篮球" /></div>
+      <div class="item" style="flex:2"><label>专业特长</label><input type="text" name="specialties" placeholder="如：Java、机器学习" /></div>
+    </div>
+    <div class="row">
       <div class="item"><label>期望薪资</label>
         <select id="salary" name="salary"><option value="">请选择</option><option>8-12K</option><option>12-16K</option><option>16-20K</option><option>20K以上</option></select></div>
       <div class="item"><label>到岗时间</label>
@@ -55,6 +71,18 @@
     <div class="row">
       <div class="item"><label>家庭住址</label><input type="text" name="homeaddr" /></div>
       <div class="item"><label>求职意向</label><input type="text" name="jobint" placeholder="期望岗位" /></div>
+    </div>
+    <!-- radio 风格的性别（模拟部分站点用单选按钮） -->
+    <div class="row">
+      <div class="item"><label>性别（单选按钮）</label>
+        <label><input type="radio" name="sex_radio" value="male" /> 男</label>
+        <label><input type="radio" name="sex_radio" value="female" /> 女</label>
+      </div>
+      <div class="item"><label>健康状况（单选按钮）</label>
+        <label><input type="radio" name="health_radio" value="good" /> 良好</label>
+        <label><input type="radio" name="health_radio" value="normal" /> 一般</label>
+        <label><input type="radio" name="health_radio" value="poor" /> 较差</label>
+      </div>
     </div>
   </fieldset>
 

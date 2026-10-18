@@ -38,6 +38,7 @@
   /** 找控件的人类可读标签 */
   function labelText(el) {
     var parts = [];
+    var inputVal = (el.value || '').trim();
     // 1) <label for>
     if (el.id) {
       var lab = el.ownerDocument.querySelector('label[for="' + cssEscape(el.id) + '"]');
@@ -54,6 +55,9 @@
         if (n) parts.push(n.textContent || '');
       });
     }
+    // 3.5) aria-label（自定义组件常用）
+    var aLabel = el.getAttribute('aria-label');
+    if (aLabel) parts.push(aLabel);
     // 4) 前置兄弟 / 表格单元格 / 前置文本
     // 爬 12 层：antd Form.Item 等组件库会在输入框外裹 4~6 层包装 div，
     // 标签 div（如光大站 .resume-form-title）在包装层之外，浅爬拿不到
@@ -74,23 +78,64 @@
       }
     }
     // 5) 父级 .form-item / .field 类容器里的 label
-    var item = el.closest && el.closest('[class*="form-item"],[class*="form-group"],[class*="field"],[class*="item"],[class*="row"],[class*="cell"],[class*="label-"]');
+    var item = el.closest && el.closest('[class*="form-item"],[class*="form_group"],[class*="form-group"],[class*="field"],[class*="item"],[class*="row"],[class*="cell"],[class*="label-"]');
     if (item) {
-      item.querySelectorAll('label,.label,[class*="label"]').forEach(function (l) {
-        if (!l.contains(el) && l.textContent) parts.push(l.textContent);
-      });
+      // 5.1) 优先找明确的表单标签元素（Phoenix/antd/Element 等）
+      var preciseLabel = item.querySelector('[class*="form-item__label"],[class*="form-item-label"],[class*="form-item__labelText"],[class*="ant-form-item-label"] > label,[class*="el-form-item__label"],[class*="van-field__label"],[class*="nut-form-item__label"],[class*="phoenix-form-item__label"]');
+      if (preciseLabel && !preciseLabel.contains(el)) {
+        var pt = (preciseLabel.textContent || '').replace(/\s+/g, ' ').trim();
+        if (pt && pt.length < 30 && pt !== inputVal) parts.push(pt);
+      }
+      // 5.2) 通用 label 元素（排除值显示元素）
+      if (!preciseLabel || parts.length === 0) {
+        var labelEls = item.querySelectorAll('label,.label,[class*="label"],.title,[class*="title"]');
+        for (var li = 0; li < labelEls.length; li++) {
+          var l = labelEls[li];
+          if (l.contains(el)) continue;
+          var lt = (l.textContent || '').trim();
+          // 排除选中值显示元素（文本等于 input value 的）
+          if (lt && lt.length < 30 && lt !== inputVal) parts.push(lt);
+        }
+      }
     }
+    // 6) 兜底：控件前面最近的短文本节点（select/radio 尤其有效）
+    var inline = findInlineLabelBefore(el);
+    if (inline) parts.push(inline);
     return dedup(parts).join(' ').slice(0, 120);
+  }
+
+  /** 找控件前面紧邻的"短文本标签"，如 <span>性别</span><select> 或 <label>性别：</label> */
+  function findInlineLabelBefore(el) {
+    var inputVal = (el.value || '').trim();
+    var n = el;
+    for (var i = 0; i < 8 && n; i++) {
+      var prev = n.previousElementSibling;
+      while (prev) {
+        var t = (prev.textContent || '').trim();
+        // 排除选项容器、按钮、值显示元素（文本等于 input value）等；只取短文本（<30字）
+        if (t && t.length < 30 && t.length >= 1 &&
+            t !== inputVal &&
+            !/^(选|请选择|search|input|button)/i.test(t) &&
+            !prev.querySelector('input,select,textarea,button')) {
+          // 去掉末尾冒号
+          return t.replace(/[：:]\s*$/, '').trim();
+        }
+        prev = prev.previousElementSibling;
+      }
+      n = n.parentElement;
+    }
+    return '';
   }
 
   function previousTextSibling(el, maxHops) {
     var n = el;
+    var inputVal = (el.value || '').trim();
     for (var i = 0; i < maxHops && n; i++) {
       var probe = n.previousElementSibling;
       if (probe) {
         var t = (probe.textContent || '').trim();
-        // 兄弟无文本（图标/占位 span 等）时不钻进去，改爬父级，否则嵌套控件会原地打转
-        if (t) return t.slice(0, 60);
+        // 排除值显示元素（文本等于 input value）和包含子控件的容器
+        if (t && t !== inputVal && !probe.querySelector('input,select,textarea,button')) return t.slice(0, 60);
       }
       n = n.parentElement;
     }
@@ -114,17 +159,41 @@
     return texts.join(' ').slice(0, 160);
   }
 
-  /** 附近上下文：向上找最近的一个语义容器，取其中标题/说明文本（截断） */
+  /**
+   * 附近上下文：向上找最近的语义容器，采集其中可能的区块标题文本。
+   * 不仅限于 h1-h6，还包括容器自身开头的直接文本（很多表单把"家庭成员"写在 plain div 里），
+   * 以及容器前一个兄弟元素（常见于"标题在上、表单在下"的布局）。
+   */
   function contextText(el) {
-    var container = el.closest && el.closest('fieldset,section,[class*="step"],[class*="module"],[class*="block"],[class*="panel"],[class*="card"],table');
+    var container = el.closest && el.closest('fieldset,section,article,[class*="step"],[class*="module"],[class*="block"],[class*="panel"],[class*="card"],[class*="form-item"],[class*="group"],[class*="section"],[class*="fieldset"],table,dl');
     if (!container) return '';
-    var heads = container.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,.title,[class*="title"],[class*="header"],caption');
     var out = [];
+    // 1) 语义标题元素
+    var heads = container.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,caption,.title,[class*="title"],[class*="header"],[class*="heading"]');
     for (var i = 0; i < Math.min(heads.length, 4); i++) {
       var t = (heads[i].textContent || '').trim();
       if (t) out.push(t);
     }
-    return out.join(' ').slice(0, 80);
+    // 2) 容器自身的直接文本节点（开头一段，通常是区块标题/说明）
+    var direct = '';
+    for (var c = container.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 3) { direct += c.textContent; }
+      else if (c.nodeType === 1) {
+        var tag = c.tagName;
+        // 跳过表单控件容器，取前面的标题性文本
+        if (/^(INPUT|TEXTAREA|SELECT|BUTTON|LABEL)$/.test(tag)) break;
+      }
+      if (direct.length > 40) break;
+    }
+    direct = direct.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (direct) out.push(direct);
+    // 3) 容器前一个兄弟元素（"标题在上、区块在下"的布局）
+    var prev = container.previousElementSibling;
+    if (prev) {
+      var pt = (prev.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (pt) out.push(pt);
+    }
+    return out.join(' ').slice(0, 100);
   }
 
   /** 同一行 key（用于日期对识别：同一 tr/行容器内两个日期控件 → start/end） */
@@ -190,10 +259,28 @@
       // 此时退回按组容器（ant-radio-group / role=radiogroup 等）收集整组
       var grp = name ? (root || doc).querySelectorAll('input[type="' + kind + '"][name="' + cssEscape(name) + '"]') : null;
       if (!grp || grp.length <= 1) {
-        var groupBox = el.closest('[role="radiogroup"],[role="group"],.ant-radio-group,.ant-checkbox-group,[class*="radio-group"],[class*="checkbox-group"],fieldset');
+        var groupBox = el.closest('[role="radiogroup"],[role="group"],.ant-radio-group,.ant-checkbox-group,[class*="radio-group"],[class*="checkbox-group"],[class*="el-radio-group"],[class*="el-checkbox-group"],[class*="van-radio-group"],[class*="van-checkbox-group"],[class*="nut-radio-group"],[class*="nut-checkbox-group"],[class*="uni-radio-group"],[class*="uni-checkbox-group"],fieldset');
         if (groupBox) grp = groupBox.querySelectorAll('input[type="' + kind + '"]');
       }
+      // 兜底：同 name 在整个文档里找（部分站 name 不同但实际是一组的，靠上面容器逻辑）
+      if (!grp || grp.length <= 1) {
+        var docAll = (root || doc).querySelectorAll('input[type="' + kind + '"][name="' + cssEscape(name) + '"]');
+        if (docAll && docAll.length > 1) grp = docAll;
+      }
       ctrl.radioGroup = grp && grp.length ? grp : [el];
+      // 提取组内所有选项的文本（value + 包裹 label 的文本），写入 optionsText，
+      // 供 matcher 做类型提示（如性别「男/女」、健康状况「良好/一般/较差」等）
+      var optTexts = [];
+      (ctrl.radioGroup || []).forEach(function (r) {
+        var v = (r.value || '').trim();
+        if (v) optTexts.push(v);
+        var w = r.closest ? r.closest('label') : null;
+        if (w) {
+          var t = (w.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t && t !== v && t.length < 20) optTexts.push(t);
+        }
+      });
+      ctrl.signals.optionsText = optTexts.join(' ').slice(0, 160);
     }
     return ctrl;
   };
@@ -220,7 +307,13 @@
     if (el.tagName === 'SELECT') return 'select';
     if (el.tagName === 'TEXTAREA') return 'textarea';
     if (el.getAttribute('contenteditable') !== null) return 'contenteditable';
-    if (el.getAttribute('role') === 'combobox') return 'combobox';
+    // 自定义选择框：Phoenix/antd/Element 等组件库的 Select 底层是 input
+    var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+    if (el.getAttribute('role') === 'combobox' ||
+        /phoenix-select__input|ant-select-selection-search-input|el-input__inner.*select|van-field__control|nut-input__input/.test(cls) ||
+        el.hasAttribute('data-select')) {
+      return 'combobox';
+    }
     var t = (el.getAttribute('type') || 'text').toLowerCase();
     if (t === 'radio') return 'radio';
     if (t === 'checkbox') return 'checkbox';

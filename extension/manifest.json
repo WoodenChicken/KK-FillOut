@@ -58,6 +58,10 @@
     {
       "resources": ["models/*"],
       "matches": ["http://*/*", "https://*/*"]
+    },
+    {
+      "resources": ["icons/*"],
+      "matches": ["http://*/*", "https://*/*"]
     }
   ]
 }

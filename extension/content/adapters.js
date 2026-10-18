@@ -122,6 +122,19 @@
       }
     },
     {
+      id: 'zhiye',
+      label: '智联企业网申 Phoenix',
+      match: function (url) { return /https?:\/\/([^/]*\.)?zhiye\.com/i.test(url); },
+      // 智联企业网申：Phoenix 组件库，所有 Select 都是自定义 input(phoenix-select__input)，
+      // 没有 name/id/placeholder，完全靠 labelText 识别
+      getFields: function () { return []; },
+      resolveKey: function (ctrl) { return ''; },
+      fillField: function (ctrl, value) {
+        // Phoenix 自定义选择框走 combobox 通用逻辑即可
+        return undefined;
+      }
+    },
+    {
       id: 'phoenix',
       label: 'Phoenix（海外校招）',
       match: function (url) { return /https?:\/\/([^/]*\.)?(phoenix|applyphoenix)[^/]*\.(com|org|io|net)/i.test(url) || /phoenix\.[a-z]+\/apply/i.test(url); },

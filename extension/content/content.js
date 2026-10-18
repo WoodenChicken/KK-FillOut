@@ -17,7 +17,9 @@
     filledOnce: false,
     lastToggleAt: 0,
     mlRequested: false,
-    lastFocused: null // 用户最后聚焦的页面控件（手动填写目标）
+    lastFocused: null, // 用户最后聚焦的页面控件（手动填写目标）
+    totalControls: 0,  // 本页表单控件总数（用于命中率计算）
+    ocrIdentified: 0   // 视觉识别关联到标签的控件数
   };
 
   // ---------- 存储装载 ----------
@@ -97,7 +99,7 @@
           while (idx < controls.length) {
             var i = idx++;
             try {
-              var p = FO.ml.predictSync(controls[i].signals);
+              var p = FO.ml.predictSync(controls[i].signals, controls[i].contextText || '');
               predictions[i] = p;
             } catch (e) { predictions[i] = null; }
           }
@@ -107,8 +109,9 @@
         finish();
       }
       function finish() {
+        state.totalControls = controls.length;
         state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, predictions);
-        state.matches.forEach(function (m) { m._resume = state.resume; });
+        state.matches.forEach(function (m) { m._resume = state.resume; m.fromOcr = false; });
         render();
         scanning = false;
       }
@@ -125,13 +128,15 @@
     }
     var matchMap = {};
     shown.forEach(function (m) {
-      (matchMap[m.key] = matchMap[m.key] || []).push({ segIdx: m.segmentIdx, matchId: m.id, tier: m.tier });
+      (matchMap[m.key] = matchMap[m.key] || []).push({ segIdx: m.segmentIdx, matchId: m.id, tier: m.tier, fromOcr: !!m.fromOcr });
     });
     FO.floatball.setState({
       matches: shown,
       matchMap: matchMap,
       resume: state.resume,
-      resumeEmpty: FO.isResumeEmpty(state.resume)
+      resumeEmpty: FO.isResumeEmpty(state.resume),
+      totalControls: state.totalControls || 0,
+      ocrIdentified: state.ocrIdentified || 0
     });
   }
 
@@ -199,6 +204,7 @@
         type: 'FO_LOG_SAMPLE',
         sample: {
           signals: m.ctrl.signals,
+          contextText: m.ctrl.contextText || '',
           label: m.key,
           score: m.score,
           url: location.origin,
@@ -214,18 +220,36 @@
   function applyOcr(payload) {
     var lines = (payload && payload.lines) || [];
     var imgW = (payload && payload.imgW) || 0;
-    if (!lines.length || !imgW) { FO.floatball.toast('视觉识别完成：页面上没有读到可用文字'); return; }
+    if (!lines.length || !imgW) {
+      FO.floatball.toast('视觉识别完成：页面上没有读到可用文字');
+      return;
+    }
     var cssLines = FO.ocr.scaleLines(lines, imgW, window.innerWidth);
     var controls = FO.scanner.scan(document);
+    state.totalControls = controls.length;
     var adapter = state.adapter;
     controls.forEach(function (c) { c.adapterKey = adapter && adapter.resolveKey ? (adapter.resolveKey(c) || '') : ''; });
     var n = FO.ocr.assignLinesToControls(cssLines, controls, window.innerWidth);
-    if (!n) { FO.floatball.toast('视觉识别完成：未找到与表单控件相邻的标签'); return; }
+    if (!n) {
+      FO.floatball.toast('视觉识别完成：未找到与表单控件相邻的标签');
+      return;
+    }
+    // 记录哪些控件拿到了 OCR 标签（用于在列表中标注「视觉识别」来源）
+    var ocrEls = {};
+    controls.forEach(function (c) { if (c.signals.ocrText) ocrEls[c.el] = true; });
+    state.ocrIdentified = n;
     state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, null);
-    state.matches.forEach(function (m) { m._resume = state.resume; });
-    if (!state.visible) { state.visible = true; FO.floatball.setVisible(true); FO.floatball.initPosition(); }
+    state.matches.forEach(function (m) {
+      m._resume = state.resume;
+      m.fromOcr = !!ocrEls[m.ctrl.el];
+    });
+    // OCR 过程中悬浮球被隐藏、面板被收起；识别完成后重新展开，让用户立刻看到结果
+    if (!state.visible) { state.visible = true; }
+    FO.floatball.setVisible(true);
+    FO.floatball.expand(true);
     render();
-    FO.floatball.toast('视觉识别：' + n + ' 个控件关联到标签，命中 ' + state.matches.length + ' 个字段');
+    var pct = state.totalControls ? Math.round(state.matches.length / state.totalControls * 100) : 0;
+    FO.floatball.toast('视觉识别完成：本页 ' + state.totalControls + ' 个字段，命中 ' + state.matches.length + ' 个（' + pct + '%），其中 ' + n + ' 个来自视觉识别');
   }
 
   document.addEventListener('fo-ocr-scan', function () {
@@ -290,7 +314,9 @@
     var d = e.detail || {};
     var key = d.key;
     var def = FO.fieldDef(key);
-    if (!def) return;
+    // 自定义字段不在 schema 中，def 为 null；此时用 key 的字段名作为标签
+    var label = def ? def.label : key.split('.').slice(1).join('.');
+    if (!def && !label) return;
     var segIdx = d.segIdx || 0;
     var target = (state.lastFocused && state.lastFocused.el && state.lastFocused.el.isConnected) ? state.lastFocused : null;
     if (!target) {
@@ -303,7 +329,7 @@
     }
     var v = FO.getResumeValue(state.resume, key, segIdx);
     if (!v) {
-      FO.floatball.toast('简历里还没有「' + def.label + '」，先去编辑简历补充');
+      FO.floatball.toast('简历里还没有「' + label + '」，先去编辑简历补充');
       return;
     }
     var adapter = state.adapter;
@@ -315,7 +341,7 @@
       var cas = FO.filler.findRegionCascade(target.el);
       if (cas) {
         var cr = FO.filler.fillRegionCascade(cas, v);
-        if (cr.ok) { FO.floatball.toast('已级联填入：' + def.label); return; }
+        if (cr.ok) { FO.floatball.toast('已级联填入：' + label); return; }
       }
     }
     var r = FO.filler.fillControl(target, v, { key: key });
@@ -324,7 +350,7 @@
       var m = state.matches.find(function (x) { return x.ctrl && x.ctrl.el === target.el; });
       if (m) logSample(m);
       // combobox 等异步填充由 filler 完成后自行 toast
-      if (!r.async) FO.floatball.toast('已填入：' + def.label + (segIdx ? '（第' + (segIdx + 1) + '条）' : '') + (r.fuzzy ? '（接近匹配，请核对）' : ''));
+      if (!r.async) FO.floatball.toast('已填入：' + label + (segIdx ? '（第' + (segIdx + 1) + '条）' : '') + (r.fuzzy ? '（接近匹配，请核对）' : ''));
     } else {
       FO.floatball.toast((r && r.message) || '填入失败');
     }

@@ -5,6 +5,10 @@
  */
 'use strict';
 
+// 截图超过此宽度先等比缩小再 OCR。视网膜屏截图常达 3000-4000px，
+// 缩小到 1600px 像素量降到约 1/4~1/6，OCR 提速明显，标签识别精度几乎无损。
+var MAX_IMG_W = 1600;
+
 var workerPromise = null;
 
 function getWorker() {
@@ -23,10 +27,27 @@ function getWorker() {
   return workerPromise;
 }
 
-function imageSize(dataUrl) {
+/**
+ * 解码截图尺寸；若超过 MAX_IMG_W 则用 canvas 等比缩小，返回新的 dataURL 与尺寸。
+ * 合并了原本独立的 imageSize + 缩放，避免图片被解码两次。
+ */
+function prepareImage(dataUrl) {
   return new Promise(function (resolve, reject) {
     var im = new Image();
-    im.onload = function () { resolve({ width: im.naturalWidth, height: im.naturalHeight }); };
+    im.onload = function () {
+      var w = im.naturalWidth, h = im.naturalHeight;
+      if (w <= MAX_IMG_W) {
+        resolve({ dataUrl: dataUrl, w: w, h: h });
+        return;
+      }
+      var scale = MAX_IMG_W / w;
+      var cv = document.createElement('canvas');
+      cv.width = MAX_IMG_W;
+      cv.height = Math.max(1, Math.round(h * scale));
+      var ctx = cv.getContext('2d');
+      ctx.drawImage(im, 0, 0, cv.width, cv.height);
+      resolve({ dataUrl: cv.toDataURL('image/png'), w: cv.width, h: cv.height });
+    };
     im.onerror = function () { reject(new Error('截图解码失败')); };
     im.src = dataUrl;
   });
@@ -53,14 +74,25 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || msg.type !== 'FO_OCR_RUN') return;
   (function () {
     var t0 = Date.now();
-    getWorker()
-      .then(function (worker) {
-        return worker.recognize(msg.dataUrl, {}, { text: true, blocks: true }).then(function (ret) {
-          return Promise.all([collectLines(ret.data), imageSize(msg.dataUrl)]);
-        });
+    var prepared;
+    prepareImage(msg.dataUrl)
+      .then(function (p) {
+        prepared = p;
+        return getWorker();
       })
-      .then(function (out) {
-        sendResponse({ ok: true, lines: out[0], imgW: out[1].width, imgH: out[1].height, ms: Date.now() - t0 });
+      .then(function (worker) {
+        // PSM 11 = Sparse text：只找零散文本行，不做整页版面/栏分析。
+        // 表单标签是散布在控件旁的短文本，此模式比默认 PSM 3 快得多。
+        return worker.recognize(prepared.dataUrl, { tessedit_pageseg_mode: '11' }, { text: true, blocks: true });
+      })
+      .then(function (ret) {
+        sendResponse({
+          ok: true,
+          lines: collectLines(ret.data),
+          imgW: prepared.w,
+          imgH: prepared.h,
+          ms: Date.now() - t0
+        });
       })
       .catch(function (e) {
         // worker 初始化失败后重置，下次重试

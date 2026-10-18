@@ -20,7 +20,7 @@
       fields: [
         { key: 'name', label: '姓名', type: 'text' },
         { key: 'gender', label: '性别', type: 'select', options: ['男', '女'] },
-        { key: 'birthDate', label: '出生年月', type: 'month' },
+        { key: 'birthDate', label: '出生日期', type: 'date' },
         { key: 'ethnicity', label: '民族', type: 'text', ext: true },
         { key: 'politicalStatus', label: '政治面貌', type: 'select', options: ['中共党员', '中共预备党员', '共青团员', '民主党派', '群众', '无党派人士'] },
         { key: 'nativePlace', label: '籍贯', type: 'text' },
@@ -31,10 +31,17 @@
         { key: 'height', label: '身高(cm)', type: 'number' },
         { key: 'weight', label: '体重(kg)', type: 'number' },
         { key: 'maritalStatus', label: '婚姻状况', type: 'select', options: ['未婚', '已婚', '保密'], ext: true },
+        { key: 'educationDegree', label: '最高学历', type: 'select', options: ['博士', '硕士', '本科', '专科', '高中', '中专', '初中', '其他'] },
+        { key: 'studyForm', label: '学习形式', type: 'select', options: ['全日制', '非全日制', '自考', '成人高考', '网络教育', '开放大学', '其他'] },
+        { key: 'nationality', label: '国籍', type: 'text' },
+        { key: 'healthStatus', label: '健康状况', type: 'select', options: ['良好', '一般', '较差'] },
+        { key: 'hobbies', label: '兴趣爱好', type: 'textarea' },
+        { key: 'specialties', label: '专业特长', type: 'textarea' },
+        { key: 'studentOrigin', label: '生源地', type: 'text' },
         { key: 'jobIntention', label: '求职意向', type: 'text' },
         { key: 'expectedSalary', label: '期望薪资', type: 'text', ext: true },
         { key: 'expectedCity', label: '期望城市', type: 'text', ext: true },
-        { key: 'availableDate', label: '到岗时间', type: 'month', ext: true },
+        { key: 'availableDate', label: '到岗时间', type: 'date', ext: true },
         { key: 'homeAddress', label: '家庭住址', type: 'text' },
         { key: 'emergencyContactName', label: '紧急联系人姓名', type: 'text' },
         { key: 'emergencyContactRelation', label: '紧急联系人关系', type: 'text' },
@@ -60,8 +67,8 @@
         { key: 'degree', label: '学历', type: 'select', options: ['博士', '硕士', '本科', '专科', '高中', '其他'] },
         { key: 'college', label: '学院', type: 'text' },
         { key: 'major', label: '专业', type: 'text' },
-        { key: 'startDate', label: '开始时间', type: 'month' },
-        { key: 'endDate', label: '结束时间', type: 'month' },
+        { key: 'startDate', label: '开始时间', type: 'date' },
+        { key: 'endDate', label: '结束时间', type: 'date' },
         { key: 'gpa', label: 'GPA', type: 'text' },
         { key: 'rank', label: '排名', type: 'text' },
         { key: 'courses', label: '主修课程', type: 'textarea' }
@@ -75,8 +82,8 @@
         { key: 'city', label: '所在城市', type: 'text' },
         { key: 'department', label: '部门', type: 'text' },
         { key: 'position', label: '岗位', type: 'text' },
-        { key: 'startDate', label: '开始时间', type: 'month' },
-        { key: 'endDate', label: '结束时间', type: 'month' },
+        { key: 'startDate', label: '开始时间', type: 'date' },
+        { key: 'endDate', label: '结束时间', type: 'date' },
         { key: 'description', label: '工作内容', type: 'textarea' }
       ]
     },
@@ -88,8 +95,8 @@
         { key: 'city', label: '所在城市', type: 'text' },
         { key: 'department', label: '部门', type: 'text' },
         { key: 'position', label: '岗位', type: 'text' },
-        { key: 'startDate', label: '开始时间', type: 'month' },
-        { key: 'endDate', label: '结束时间', type: 'month' },
+        { key: 'startDate', label: '开始时间', type: 'date' },
+        { key: 'endDate', label: '结束时间', type: 'date' },
         { key: 'leaveReason', label: '离职原因', type: 'text' }
       ]
     },
@@ -99,8 +106,8 @@
       fields: [
         { key: 'name', label: '项目名称', type: 'text' },
         { key: 'role', label: '角色', type: 'text' },
-        { key: 'startDate', label: '开始时间', type: 'month' },
-        { key: 'endDate', label: '结束时间', type: 'month' },
+        { key: 'startDate', label: '开始时间', type: 'date' },
+        { key: 'endDate', label: '结束时间', type: 'date' },
         { key: 'techStack', label: '技术栈', type: 'text' },
         { key: 'description', label: '项目描述', type: 'textarea' },
         { key: 'achievement', label: '成果', type: 'textarea' }
@@ -111,7 +118,7 @@
       type: 'array',
       fields: [
         { key: 'name', label: '证书名', type: 'text' },
-        { key: 'date', label: '获得时间', type: 'month' },
+        { key: 'date', label: '获得时间', type: 'date' },
         { key: 'issuer', label: '颁发机构', type: 'text' },
         { key: 'number', label: '编号', type: 'text' }
       ]
@@ -122,7 +129,7 @@
       fields: [
         { key: 'name', label: '名称', type: 'text' },
         { key: 'level', label: '级别', type: 'text' },
-        { key: 'date', label: '时间', type: 'month' },
+        { key: 'date', label: '时间', type: 'date' },
         { key: 'issuer', label: '颁发单位', type: 'text' }
       ]
     },
@@ -160,7 +167,7 @@
     internship: ['实习'],
     work: ['工作经历', '工作经验', '职业经历'],
     project: ['项目'],
-    family: ['家庭', '成员', '亲人'],
+    family: ['家庭', '成员', '亲人', '家属', '亲属', '父母', '父母亲', '父亲', '母亲', '配偶', '子女', '家庭成员'],
     certificate: ['证书', '资格证'],
     honor: ['荣誉', '奖项', '奖惩', '获奖'],
     skills: ['技能', '特长']
@@ -182,6 +189,50 @@
     return resume;
   };
 
+  /** 取某组 schema 定义的字段 key 列表（含 extras），用于识别自定义字段 */
+  function schemaFieldKeys(def) {
+    var keys = def.fields.map(function (f) { return f.key; });
+    (def.extras || []).forEach(function (f) { keys.push(f.key); });
+    return keys;
+  }
+
+  /**
+   * 取某组里「自定义字段」的 key 列表（即不在 schema.fields/extras 中的 key）。
+   * - object 组：直接看 resume[gKey] 的 key
+   * - array 组：汇总所有段中出现过的自定义 key
+   * - skills 组：汇总所有 skill item 中除 name/level 外的 key
+   */
+  FO.customKeysOf = function (resume, groupKey) {
+    var def = FO.SCHEMA[groupKey];
+    if (!def || !resume) return [];
+    var sk = schemaFieldKeys(def);
+    if (def.type === 'object') {
+      var node = resume[groupKey];
+      if (!node || typeof node !== 'object') return [];
+      return Object.keys(node).filter(function (k) { return sk.indexOf(k) === -1; });
+    }
+    if (def.type === 'array') {
+      var arr = resume[groupKey];
+      if (!Array.isArray(arr)) return [];
+      var set = {};
+      arr.forEach(function (row) {
+        if (!row || typeof row !== 'object') return;
+        Object.keys(row).forEach(function (k) { if (sk.indexOf(k) === -1) set[k] = 1; });
+      });
+      return Object.keys(set);
+    }
+    if (def.type === 'skills') {
+      var items = (resume.skills && resume.skills.items) || [];
+      var s2 = {};
+      items.forEach(function (it) {
+        if (!it || typeof it !== 'object') return;
+        Object.keys(it).forEach(function (k) { if (k !== 'name' && k !== 'level') s2[k] = 1; });
+      });
+      return Object.keys(s2);
+    }
+    return [];
+  };
+
   /** 把任意来源（解析器/手填/旧版本）的数据规范成标准 resume；非法输入尽量兜底 */
   FO.normalizeResume = function (input) {
     var resume = FO.emptyResume();
@@ -195,20 +246,42 @@
           resume[g] = val.map(function (item) {
             var row = {};
             def.fields.forEach(function (f) { row[f.key] = stringify(item && item[f.key]); });
+            // 保留该段的自定义字段（不在 schema.fields 中的 key）
+            if (item && typeof item === 'object') {
+              Object.keys(item).forEach(function (k) {
+                if (schemaFieldKeys(def).indexOf(k) === -1) row[k] = stringify(item[k]);
+              });
+            }
             return row;
           }).filter(function (row) {
-            return def.fields.some(function (f) { return row[f.key]; });
+            // 至少有一个 schema 字段或自定义字段非空才保留该段
+            return def.fields.some(function (f) { return row[f.key]; }) ||
+              Object.keys(row).some(function (k) {
+                return schemaFieldKeys(def).indexOf(k) === -1 && row[k];
+              });
           });
         }
       } else if (def.type === 'skills') {
         if (Array.isArray(val)) {
           resume.skills.items = val.map(function (item) {
-            return { name: stringify(item && item.name), level: stringify(item && item.level) };
+            var it = { name: stringify(item && item.name), level: stringify(item && item.level) };
+            if (item && typeof item === 'object') {
+              Object.keys(item).forEach(function (k) {
+                if (k !== 'name' && k !== 'level') it[k] = stringify(item[k]);
+              });
+            }
+            return it;
           }).filter(function (it) { return it.name; });
         } else if (val && typeof val === 'object') {
           if (Array.isArray(val.items)) {
             resume.skills.items = val.items.map(function (item) {
-              return { name: stringify(item && item.name), level: stringify(item && item.level) };
+              var it = { name: stringify(item && item.name), level: stringify(item && item.level) };
+              if (item && typeof item === 'object') {
+                Object.keys(item).forEach(function (k) {
+                  if (k !== 'name' && k !== 'level') it[k] = stringify(item[k]);
+                });
+              }
+              return it;
             }).filter(function (it) { return it.name; });
           }
           resume.skills.selfAssessment = stringify(val.selfAssessment);
@@ -225,6 +298,12 @@
           var v = stringify(val[f.key]);
           if (v) resume[g][f.key] = v;
         });
+        // 保留该组的自定义字段（不在 schema.fields 中的 key）
+        if (val && typeof val === 'object') {
+          Object.keys(val).forEach(function (k) {
+            if (schemaFieldKeys(def).indexOf(k) === -1) resume[g][k] = stringify(val[k]);
+          });
+        }
       }
     });
     return resume;
@@ -249,7 +328,8 @@
       if (def.type === 'array') return v.length > 0;
       if (def.type === 'skills') return (v.items && v.items.length > 0) || !!v.selfAssessment;
       if (def.type === 'custom') return Object.keys(v).length > 0;
-      return def.fields.some(function (f) { return v[f.key]; });
+      // object 组：任一字段（含自定义）非空即算有内容
+      return Object.keys(v).some(function (k) { return v[k]; });
     });
   };
 

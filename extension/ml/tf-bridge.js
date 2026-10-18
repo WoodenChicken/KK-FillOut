@@ -11,16 +11,19 @@
   var model = null, meta = null;
   var TYPE_SLOTS = ['text', 'textarea', 'select', 'date', 'number', 'radio'];
 
-  function buildFeatures(signals) {
+  function buildFeatures(signals, contextText) {
     var vocab = meta.vocab;
     var dim = vocab.length;
     var vec = new Array(dim + TYPE_SLOTS.length).fill(0);
     var texts = [
       signals.labelText || '', signals.placeholder || '', signals.name || '',
       signals.id || '', signals.ariaLabel || '', signals.dataAttrs || ''
-    ].join(' ').toLowerCase();
+    ];
+    // 加入 section 上下文（如「家庭成员」「教育经历」），让模型学会 section 消歧
+    if (contextText) texts.push(contextText);
+    var text = texts.join(' ').toLowerCase();
     // 中文 char-bigram + ASCII 词
-    var cjk = texts.replace(/[\x00-\x7e]+/g, ' $& ');
+    var cjk = text.replace(/[\x00-\x7e]+/g, ' $& ');
     for (var i = 0; i < cjk.length - 1; i++) {
       var bg = cjk.slice(i, i + 2);
       if (/[\u4e00-\u9fa5]{2}/.test(bg)) {
@@ -28,7 +31,7 @@
         if (j >= 0) vec[j] = 1;
       }
     }
-    texts.replace(/[a-z0-9_\-]{2,}/g, function (w) {
+    text.replace(/[a-z0-9_\-]{2,}/g, function (w) {
       var j = vocab.indexOf(w);
       if (j >= 0) vec[j] = 1;
       return w;
@@ -51,11 +54,14 @@
         window.FO.ml.ready = true;
       });
     },
-    /** signals -> { key, score } | null（top1） */
-    predictSync: function (signals) {
+    /**
+     * 推理：signals + 可选 contextText -> { key, score } | null（top1）
+     * 传入 section 上下文可显著提升跨组同名字段（如姓名/电话）的消歧准确率。
+     */
+    predictSync: function (signals, contextText) {
       if (!model || !meta) return null;
       try {
-        var vec = buildFeatures(signals);
+        var vec = buildFeatures(signals, contextText);
         var input = window.tf.tensor2d([vec]);
         var out = model.predict(input);
         var probs = out.dataSync();

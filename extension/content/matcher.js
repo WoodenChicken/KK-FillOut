@@ -32,12 +32,21 @@
     'basicInfo.emergencyContactName': ['紧急联系人姓名', '紧急联系人', '应急联系人', '紧急联络人', 'emergency contact name', 'emergency contact'],
     'basicInfo.emergencyContactRelation': ['与紧急联系人关系', '紧急联系人关系', '与紧急联系人的关系', '与本人关系', 'emergency relation'],
     'basicInfo.emergencyContactPhone': ['紧急联系人电话', '紧急联系人手机', '紧急联系人号码', '紧急联系电话', '紧急联系方式', 'emergency phone'],
+    'basicInfo.educationDegree': ['最高学历', '学历', '学历层次', '学历/学位', '文化程度', '学位', 'degree', 'education level', 'highest education'],
+    'basicInfo.studyForm': ['学习形式', '学习方式', '培养方式', '就读方式', 'study form', 'study mode', 'education type'],
+    'basicInfo.nationality': ['国籍', '民族国籍', 'nationality', 'citizenship', 'country'],
+    'basicInfo.healthStatus': ['健康状况', '健康情况', '健康状态', '身体状况', 'health status', 'health condition'],
+    'basicInfo.hobbies': ['兴趣爱好', '爱好', '兴趣', '特长爱好', 'hobbies', 'interests'],
+    'basicInfo.specialties': ['专业特长', '专业技能', '专长', '特长', 'specialties', 'special skills', 'professional skills'],
+    'basicInfo.studentOrigin': ['生源地', '生源', '生源所在地', '生源地区', 'student origin', 'source place'],
     // ---- family ----
-    'family.name': ['家庭成员姓名', '成员姓名', '家人姓名', '亲属姓名', 'member name'],
-    'family.relation': ['家庭成员关系', '成员关系', '与本人关系', '家庭关系', 'relationship'],
-    'family.workUnit': ['家庭成员工作单位', '成员工作单位', '工作单位', '父母单位', '单位名称', 'work unit', 'employer'],
-    'family.jobTitle': ['家庭成员职务', '成员职务', '职务', '职位名称', 'job title', 'position'],
-    'family.phone': ['家庭成员电话', '成员电话', '联系电话', 'member phone'],
+    // 注意：'姓名'/'电话' 等裸标签同时出现在 basicInfo 与 family 两组，
+    // 由 disambiguateBySection 根据 section 上下文裁决归属，避免家庭成员字段被填成自己的。
+    'family.name': ['家庭成员姓名', '成员姓名', '家人姓名', '亲属姓名', '姓名', '名字', 'member name'],
+    'family.relation': ['家庭成员关系', '成员关系', '与本人关系', '家庭关系', '关系', 'relationship'],
+    'family.workUnit': ['家庭成员工作单位', '成员工作单位', '工作单位', '父母单位', '单位名称', '单位', 'work unit', 'employer'],
+    'family.jobTitle': ['家庭成员职务', '成员职务', '职务', '职位名称', '职位', 'job title', 'position'],
+    'family.phone': ['家庭成员电话', '成员电话', '联系电话', '电话', '手机', '手机号', 'member phone'],
     // ---- education ----
     'education.school': ['毕业院校', '学校名称', '毕业学校', '就读学校', '院校名称', '毕业院系', '院校', '学校', 'university name', 'university', 'college', 'school'],
     'education.degree': ['最高学历', '学历层次', '学历/学位', '学历', '学位', 'degree', 'education level'],
@@ -49,8 +58,11 @@
     'education.rank': ['专业排名', '成绩排名', '年级排名', '排名', 'class rank', 'ranking'],
     'education.courses': ['主修课程', '主要课程', '核心课程', '所学课程', '主修', 'relevant courses', 'courses'],
     // ---- internship / work ----
-    'internship.company': ['实习单位', '实习公司', '实习企业', 'internship company', 'intern company'],
-    'work.company': ['工作单位', '公司名称', '所在公司', '工作企业', '任职公司', '单位名称', '公司', '企业名称', 'company name', 'company', 'employer', 'organization'],
+    // 注意：裸标签 '单位' / '工作单位' 同时属于实习/工作/家庭成员三组，
+    // 由 section 上下文（GROUP_KEYWORDS）与 SEMANTIC_SIBLINGS 的 company 簇裁决归属，
+    // 避免把「实习单位」「工作单位」误填成家庭成员的工作单位。
+    'internship.company': ['实习单位', '实习公司', '实习企业', '实习工作单位', '工作单位', '单位', 'internship company', 'intern company'],
+    'work.company': ['工作单位', '公司名称', '所在公司', '工作企业', '任职公司', '单位名称', '单位', '公司', '企业名称', 'company name', 'company', 'employer', 'organization'],
     'internship.city': ['实习城市', '实习地点', 'intern city'],
     'work.city': ['工作城市', '工作地点', '所在城市', '工作所在城市', 'job city', 'work location'],
     'internship.department': ['实习部门', 'department'],
@@ -90,6 +102,25 @@
   };
 
   var GENERIC_SINGLE = { 'phone': 'basicInfo.phone', 'email': 'basicInfo.email' };
+
+  /**
+   * 跨组通用裸标签：同一个 pattern 出现在多个 key 的 DICT 中。
+   * 例如 '姓名' 同时属于 basicInfo.name 和 family.name，这类词不能仅凭自身决定归属，
+   * 必须结合 section 上下文（disambiguateBySection）裁决。
+   */
+  var GENERIC_PATTERNS = (function () {
+    var count = {};
+    Object.keys(DICT).forEach(function (k) {
+      DICT[k].forEach(function (p) {
+        var np = norm(p);
+        if (!np) return;
+        count[np] = (count[np] || 0) + 1;
+      });
+    });
+    var gen = {};
+    Object.keys(count).forEach(function (p) { if (count[p] > 1) gen[p] = true; });
+    return gen;
+  })();
 
   function norm(s) {
     return String(s == null ? '' : s)
@@ -141,12 +172,12 @@
    * ctrl 由 scanner 产出：{ el, kind, type, signals: {labelText, placeholder, name, id, ariaLabel, dataAttrs, optionsText}, contextText }
    */
   function scoreControl(ctrl) {
-    var scores = {}; // key -> {score, matchedPatternLen}
+    var scores = {}; // key -> {score, matchedLen, matchedPat}
     var keys = Object.keys(DICT);
     for (var k = 0; k < keys.length; k++) {
       var key = keys[k];
       var patterns = DICT[key];
-      var best = 0, bestLen = 0;
+      var best = 0, bestLen = 0, bestPat = '';
       for (var w = 0; w < patterns.length; w++) {
         var pat = patterns[w];
         var sigNames = Object.keys(SIGNAL_WEIGHTS);
@@ -158,10 +189,10 @@
           if (ps <= 0) continue;
           var sc = ps * SIGNAL_WEIGHTS[sig];
           if (sig === 'contextText') sc *= 0.75;
-          if (sc > best) { best = sc; bestLen = norm(pat).length; }
+          if (sc > best) { best = sc; bestLen = norm(pat).length; bestPat = norm(pat); }
         }
       }
-      if (best > 0) scores[key] = { score: Math.min(best, 1), matchedLen: bestLen };
+      if (best > 0) scores[key] = { score: Math.min(best, 1), matchedLen: bestLen, matchedPat: bestPat };
     }
     return scores;
   }
@@ -197,34 +228,119 @@
     }
     var opts = ctrl.signals.optionsText || '';
     if (opts) {
-      if (/(^|\s)(男|女)(\s|$)/.test(opts) && opts.length < 40) bump('basicInfo.gender', 0.3);
+      // 性别：男/女 是极强特征（radio/select 均可），即使标签没写"性别"也直接命中
+      if (/(^|\s|）)(男|女)(\s|$|）)/.test(opts) || /(^|[^男女])(男|女)([^男女]|$)/.test(opts)) {
+        if (!scores['basicInfo.gender']) scores['basicInfo.gender'] = { score: 0.78, matchedLen: 2, matchedPat: '性别' };
+        else bump('basicInfo.gender', 0.2);
+      }
       if (/中共党员|共青团员|群众|政治面貌/.test(opts)) bump('basicInfo.politicalStatus', 0.3);
       if (/未婚|已婚|离异/.test(opts) && opts.length < 40) bump('basicInfo.maritalStatus', 0.28);
-      if (/本科|硕士|博士|专科|大专/.test(opts)) bump('education.degree', 0.3);
+      if (/本科|硕士|博士|专科|大专|中专/.test(opts)) { bump('basicInfo.educationDegree', 0.3); bump('education.degree', 0.2); }
+      if (/全日制|非全日制|自考|成人高考|网络教育/.test(opts)) bump('basicInfo.studyForm', 0.3);
+      if (/良好|一般|较差|健康/.test(opts) && opts.length < 40) bump('basicInfo.healthStatus', 0.28);
       if (/了解|一般|熟练|精通/.test(opts) && opts.length < 40) bump('skills.level', 0.25);
-      if (/汉族|回族|满族|壮族/.test(opts) && opts.length < 40) bump('basicInfo.ethnicity', 0.25);
+      // 民族：56个民族选项文本很长，不能用长度限制
+      if (/汉族|回族|满族|壮族|维吾尔族|蒙古族|藏族|苗族|彝族|土家族|哈萨克族|傣族|黎族|傈僳族|佤族|畲族|高山族|拉祜族|水族|东乡族|纳西族|景颇族|柯尔克孜族|土族|达斡尔族|仫佬族|羌族|布朗族|撒拉族|毛南族|仡佬族|锡伯族|阿昌族|普米族|塔吉克族|怒族|乌孜别克族|俄罗斯族|鄂温克族|德昂族|保安族|裕固族|京族|塔塔尔族|独龙族|鄂伦春族|赫哲族|门巴族|珞巴族|基诺族/.test(opts)) {
+        bump('basicInfo.ethnicity', 0.35);
+      }
     }
   }
 
-  /** 组上下文：看控件附近容器文本里的组关键词 */
-  function contextBoost(ctrl, scores) {
+  /** 从控件的 contextText 推断它所属的 section 组（如「家庭」「教育」「工作」） */
+  function detectSectionGroup(ctrl) {
     var ctx = ctrl.contextText || '';
-    if (!ctx) return;
-    var ctxGroup = null;
+    if (!ctx) return null;
     var groups = Object.keys(FO.GROUP_KEYWORDS);
     for (var i = 0; i < groups.length; i++) {
       var kws = FO.GROUP_KEYWORDS[groups[i]];
       for (var j = 0; j < kws.length; j++) {
-        if (ctx.indexOf(kws[j]) !== -1) { ctxGroup = groups[i]; break; }
+        if (ctx.indexOf(kws[j]) !== -1) return groups[i];
       }
-      if (ctxGroup) break;
     }
+    return null;
+  }
+
+  /**
+   * 组上下文：看控件附近容器文本里的组关键词。
+   * 与旧版相比：移除了 score<0.9 才惩罚的例外，跨组字段一律轻罚，
+   * 让「家庭区里的姓名」即使和 basicInfo.name 同分也能被裁决。
+   */
+  function contextBoost(ctrl, scores) {
+    var ctxGroup = detectSectionGroup(ctrl);
     if (!ctxGroup) return;
     Object.keys(scores).forEach(function (key) {
       var g = FO.groupOf(key);
-      if (g === ctxGroup) scores[key].score = Math.min(1, scores[key].score + 0.12);
-      else if (scores[key].score < 0.9) scores[key].score *= 0.88;
+      if (g === ctxGroup) scores[key].score = Math.min(1, scores[key].score + 0.15);
+      else scores[key].score *= 0.85;
     });
+  }
+
+  /**
+   * 跨组语义同名字段簇：section 消歧时用于把裸标签路由到正确组。
+   * 例如 '姓名' 可能命中 basicInfo.name 或 family.name，由 section 决定。
+   */
+  var SEMANTIC_SIBLINGS = {
+    name: ['basicInfo.name', 'family.name'],
+    phone: ['basicInfo.phone', 'family.phone'],
+    company: ['family.workUnit', 'work.company', 'internship.company'],
+    position: ['family.jobTitle', 'work.position', 'internship.position'],
+    degree: ['basicInfo.educationDegree', 'education.degree']
+  };
+
+  /** 反查表：key -> 它所属的语义簇名 */
+  var SIBLING_CLUSTER_OF = (function () {
+    var m = {};
+    Object.keys(SEMANTIC_SIBLINGS).forEach(function (c) {
+      SEMANTIC_SIBLINGS[c].forEach(function (k) { m[k] = c; });
+    });
+    return m;
+  })();
+
+  /**
+   * Section 消歧：当控件所在 section 明确（如「家庭成员」），且当前最高分命中的是
+   * 「跨组通用裸标签」（如 '姓名'），则把分数路由到 section 所属组的语义同名字段，
+   * 避免家庭成员姓名被填成自己的姓名。
+   *
+   * 触发条件：
+   *  1. detectSectionGroup 返回非 basicInfo 的组；
+   *  2. 当前 top key 的组 ≠ section 组；
+   *  3. top key 的 matchedPat 是 GENERIC_PATTERNS 中的通用裸标签
+   *     （组特有词如 '申请人姓名' 不会被路由，仍归 basicInfo）。
+   */
+  function disambiguateBySection(ctrl, scores) {
+    var ctxGroup = detectSectionGroup(ctrl);
+    if (!ctxGroup || ctxGroup === 'basicInfo') return;
+
+    var topKey = null, topScore = 0;
+    Object.keys(scores).forEach(function (k) {
+      if (scores[k].score > topScore) { topScore = scores[k].score; topKey = k; }
+    });
+    if (!topKey) return;
+    if (FO.groupOf(topKey) === ctxGroup) return; // 已经在正确组
+
+    // top key 的命中 pattern 必须是跨组通用裸标签，才允许路由
+    var topPat = scores[topKey].matchedPat || '';
+    if (!topPat || !GENERIC_PATTERNS[topPat]) return;
+
+    // 找 top key 所属的语义簇，再在 section 组里找同簇字段
+    var cluster = SIBLING_CLUSTER_OF[topKey];
+    if (!cluster) return;
+    var siblings = SEMANTIC_SIBLINGS[cluster];
+    var targetKey = null;
+    for (var i = 0; i < siblings.length; i++) {
+      if (FO.groupOf(siblings[i]) === ctxGroup) { targetKey = siblings[i]; break; }
+    }
+    if (!targetKey) return;
+
+    // 把分数转移到 section 组的同名字段（略打折），并惩罚原 top key
+    var transfer = topScore * 0.9;
+    if (scores[targetKey]) {
+      scores[targetKey].score = Math.max(scores[targetKey].score, transfer);
+      scores[targetKey].section = true;
+    } else {
+      scores[targetKey] = { score: transfer, matchedLen: scores[topKey].matchedLen || 0, matchedPat: topPat, section: true };
+    }
+    scores[topKey].score *= 0.4;
   }
 
   /** ML 融合：FO.ml.predict(signals) -> {key, score} | null */
@@ -236,7 +352,7 @@
       scores[prediction.key].score = Math.min(1, Math.max(rule, mp * 0.95) + (rule > 0.3 && mp > 0.3 ? 0.06 : 0));
       scores[prediction.key].model = true;
     } else if (mp >= 0.5) {
-      scores[prediction.key] = { score: mp * 0.9, matchedLen: 0, model: true };
+      scores[prediction.key] = { score: mp * 0.9, matchedLen: 0, matchedPat: '', model: true };
     }
   }
 
@@ -281,23 +397,102 @@
   }
 
   /**
+   * 家庭成员关系联动：同一行（rowKey 相同）内若存在「关系」字段且其标签/选项/已填值
+   * 包含父亲/母亲/配偶/子女等亲属称谓，则同行的「姓名」「电话」「工作单位」「职务」
+   * 字段强制路由到 family.*，避免被 basicInfo 同名裸标签抢走。
+   * 这是比 section 消歧更强的信号——亲属称谓本身就是 family 区的确凿证据。
+   */
+  var FAMILY_RELATION_HINT = /父亲|母亲|爸爸|妈妈|父|母|配偶|妻子|丈夫|老公|老婆|子女|儿子|女儿|兄|弟|姐|妹|爷爷|奶奶|外公|外婆|岳父|岳母|公公|婆婆/;
+
+  function pairFamilyRelation(controls, results) {
+    var rows = {};
+    results.forEach(function (m, i) {
+      if (!m) return;
+      var rk = controls[i].rowKey || '';
+      if (!rk) return;
+      (rows[rk] = rows[rk] || []).push(i);
+    });
+    Object.keys(rows).forEach(function (rk) {
+      var idxs = rows[rk];
+      if (idxs.length < 2) return;
+      // 检查该行是否有 family 关系信号（关系字段的标签/选项/值含亲属称谓）
+      var hasFamilyRelation = false;
+      for (var i = 0; i < idxs.length; i++) {
+        var ctrl = controls[idxs[i]];
+        var sig = (ctrl.signals.labelText || '') + ' ' + (ctrl.signals.optionsText || '') + ' ' + (ctrl.signals.placeholder || '');
+        if (FAMILY_RELATION_HINT.test(sig)) { hasFamilyRelation = true; break; }
+      }
+      if (!hasFamilyRelation) return;
+      // 同行内的 basicInfo 裸标签字段，若 family 有同名字段则强制路由
+      var SIBLING_MAP = {
+        'basicInfo.name': 'family.name',
+        'basicInfo.phone': 'family.phone'
+      };
+      // workUnit / jobTitle 在 family 里叫 workUnit/jobTitle，basicInfo 没有，所以它们不会误命中 basicInfo
+      for (var j = 0; j < idxs.length; j++) {
+        var m = results[idxs[j]];
+        if (!m) continue;
+        var target = SIBLING_MAP[m.key];
+        if (target) {
+          // 仅当该控件标签是裸标签（姓名/电话）而非组特有词时才路由
+          var pat = m.ctrl.signals.labelText || '';
+          if (/^(姓名|名字|电话|手机|手机号|联系电话)$/.test(pat.trim())) {
+            m.key = target;
+            m.score = Math.min(1, m.score + 0.12);
+            m.source = 'family-relation';
+          }
+        }
+      }
+    });
+  }
+
+  /**
    * 主入口：controls -> matches。
    * 每个 match: { id, ctrl, key, score, tier, source, candidates: [{key, score}], segmentIdx }
    */
   FO.matcher.matchAll = function (controls, resume, settings, modelPredictions) {
+    // 把简历中各组的自定义字段注册进 DICT，字段名本身作为匹配关键词
+    // （例如 basicInfo.wechat -> 用「微信号」去匹配页面标签）
+    if (resume) {
+      Object.keys(FO.SCHEMA).forEach(function (gKey) {
+        var def = FO.SCHEMA[gKey];
+        if (def.type === 'custom') return; // 全局 custom 组单独处理
+        var ckeys = FO.customKeysOf(resume, gKey);
+        ckeys.forEach(function (ck) {
+          var dkey = gKey + '.' + ck;
+          // 用字段名 + 常见变体做匹配词
+          DICT[dkey] = [ck];
+        });
+      });
+      // 全局自定义字段
+      Object.keys(resume.custom || {}).forEach(function (ck) {
+        DICT['custom.' + ck] = [ck];
+      });
+    }
+
     var results = [];
+    // radio 组去重：同组多个 radio 共享标签和选项，只需匹配一次，避免列表出现重复行
+    var seenRadioGroups = new Set();
     for (var i = 0; i < controls.length; i++) {
       var ctrl = controls[i];
       ctrl.documentOrder = i;
+      if (ctrl.kind === 'radio' && ctrl.radioGroup && ctrl.radioGroup.length > 1) {
+        var gKey = ctrl.el.name ||
+          (ctrl.radioGroup[0] && (ctrl.radioGroup[0].name || ctrl.radioGroup[0].id)) ||
+          '__radio_grp_' + i;
+        if (seenRadioGroups.has(gKey)) continue;
+        seenRadioGroups.add(gKey);
+      }
       var scores = scoreControl(ctrl);
       arbitrate(scores);
       typeHints(ctrl, scores);
       contextBoost(ctrl, scores);
+      disambiguateBySection(ctrl, scores);
       if (modelPredictions && modelPredictions[i]) mergeModel(ctrl, scores, modelPredictions[i]);
 
       // 站点适配器的强映射（如 data-field-name 直接命中）
       if (ctrl.adapterKey && FO.fieldDef(ctrl.adapterKey)) {
-        scores[ctrl.adapterKey] = { score: 1, matchedLen: 99, adapter: true };
+        scores[ctrl.adapterKey] = { score: 1, matchedLen: 99, matchedPat: '__adapter__', adapter: true };
       }
 
       var ranked = Object.keys(scores)
@@ -315,7 +510,7 @@
         ctrl: ctrl,
         key: top.key,
         score: Math.round(top.score * 1000) / 1000,
-        source: scores[top.key].adapter ? 'adapter' : (scores[top.key].model ? 'model+rules' : 'rules'),
+        source: scores[top.key].adapter ? 'adapter' : (scores[top.key].section ? 'section-routed' : (scores[top.key].model ? 'model+rules' : 'rules')),
         candidates: ranked.slice(0, 3),
         tier: tierOf(top.score, settings),
         segmentIdx: 0
@@ -323,41 +518,105 @@
     }
 
     pairDates(controls, results);
+    pairFamilyRelation(controls, results);
     assignSegments(results, resume);
 
     return results.filter(Boolean);
   };
 
   /**
-   * 数组组分段：同一 key 的多个控件按「粗粒度容器」（fieldset/section/step 等）分块。
-   * 注意不能把 .item/.row 这类逐字段包装层当成分段容器。
+   * 数组组分段：把同一「组」的多段控件切分到各自的段。
+   *
+   * 旧实现按单个 key 分组，并用固定的容器选择器（table / class*=block 等）找 block 祖先：
+   *   1) 找不到容器时全部落到第 0 段（两段工作经历都填到了第一段）；
+   *   2) 选择器过于宽泛时常返回包住「所有段」的大容器，同样把多段压成一段。
+   *
+   * 新实现按「组」整体计算：
+   *   - 结构分段：取所有控件的最深公共祖先（LCA），LCA 之下的直接子节点即一段；
+   *   - 结构无法区分时退回「同一 key 的出现次序」分段（第 n 次出现 -> 第 n 段）。
    */
-  var SEGMENT_CONTAINER_SEL = 'fieldset,section,article,li,tr,dd,table,[class*="step"],[class*="module"],[class*="card"],[class*="experience"],[class*="segment"],[class*="fieldset"],[class*="block"]';
-
-  function assignSegments(results, resume) {
-    var byKey = {};
-    results.forEach(function (m) {
-      if (!m || !FO.isArrayKey(m.key)) return;
-      (byKey[m.key] = byKey[m.key] || []).push(m);
-    });
-    Object.keys(byKey).forEach(function (key) {
-      var ms = byKey[key].sort(function (a, b) { return a.ctrl.documentOrder - b.ctrl.documentOrder; });
-      var containers = [];
-      ms.forEach(function (m) {
-        var c = blockAncestor(m.ctrl.el);
-        var idx = containers.indexOf(c);
-        if (idx === -1) { containers.push(c); idx = containers.length - 1; }
-        m.segmentIdx = idx;
-      });
-      // 段数不能超过简历里的条数：多余的段从 0 开始兜底
-      var maxSeg = FO.segmentCount(resume, FO.groupOf(key));
-      ms.forEach(function (m) { if (m.segmentIdx >= maxSeg) m.segmentIdx = 0; });
-    });
+  function ancestorPath(node, limit) {
+    var path = [], cur = node, n = 0;
+    while (cur && n < (limit || 30)) { path.push(cur); cur = cur.parentElement; n++; }
+    return path;
   }
 
-  function blockAncestor(el) {
-    if (!el || !el.closest) return null;
-    return el.closest(SEGMENT_CONTAINER_SEL);
+  function lowestCommonAncestor(nodes) {
+    var valid = nodes.filter(Boolean);
+    if (!valid.length) return null;
+    if (valid.length === 1) return valid[0].parentElement || valid[0];
+    var path = ancestorPath(valid[0]);
+    for (var i = 1; i < valid.length; i++) {
+      var p = ancestorPath(valid[i]);
+      var j = 0;
+      while (j < path.length && j < p.length && path[j] === p[j]) j++;
+      path = path.slice(0, j);
+      if (!path.length) return null;
+    }
+    return path.length ? path[path.length - 1] : null;
+  }
+
+  /** 控件所在段节点 = 从控件向上、LCA（不含）之下的那一层节点 */
+  function segmentNodeOf(el, lca) {
+    if (!el) return null;
+    var cur = el, prev = el;
+    while (cur && cur !== lca) { prev = cur; cur = cur.parentElement; }
+    return cur === lca ? prev : null;
+  }
+
+  /** 结构分段：返回每个匹配的段号；无法结构区分时返回 null */
+  function structuralIndices(ms) {
+    var els = ms.map(function (m) { return m.ctrl && m.ctrl.el; });
+    var lca = lowestCommonAncestor(els);
+    if (!lca) return null;
+    var order = [], idxOf = new Map(), indices = [];
+    for (var i = 0; i < ms.length; i++) {
+      var node = segmentNodeOf(els[i], lca);
+      if (!node) return null;
+      var k = idxOf.get(node);
+      if (k === undefined) { k = order.length; order.push(node); idxOf.set(node, k); }
+      indices.push(k);
+    }
+    return { indices: indices, count: order.length };
+  }
+
+  /** 次序分段：同一 key 的第 n 次出现 -> 第 n 段 */
+  function ordinalIndices(ms) {
+    var counter = {}, indices = [];
+    ms.forEach(function (m) {
+      var c = counter[m.key] || 0;
+      counter[m.key] = c + 1;
+      indices.push(c);
+    });
+    return indices;
+  }
+
+  function assignSegments(results, resume) {
+    var byGroup = {};
+    results.forEach(function (m) {
+      if (!m || !FO.isArrayKey(m.key)) return;
+      var g = FO.groupOf(m.key);
+      (byGroup[g] = byGroup[g] || []).push(m);
+    });
+    Object.keys(byGroup).forEach(function (g) {
+      var ms = byGroup[g].sort(function (a, b) { return a.ctrl.documentOrder - b.ctrl.documentOrder; });
+      var maxSeg = Math.max(1, FO.segmentCount(resume, g));
+
+      var indices = null;
+      var s = structuralIndices(ms);
+      // 结构结果可信的条件：确实切出多段（>=2）、不超过简历段数、且存在「同段多字段」的分组
+      if (s && s.count >= 2 && s.count <= maxSeg && s.count < ms.length) {
+        indices = s.indices;
+      } else {
+        indices = ordinalIndices(ms);
+      }
+
+      ms.forEach(function (m, i) {
+        var idx = indices[i] || 0;
+        if (idx >= maxSeg) idx = maxSeg - 1; // 页面段数多于简历：落到最后一段，避免全挤到第 0 段
+        m.segmentIdx = idx;
+      });
+    });
   }
 
   FO.matcher.DICT = DICT;

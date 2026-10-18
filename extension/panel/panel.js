@@ -50,8 +50,9 @@
 
   // ---------- 表单渲染 ----------
   function inputHtml(def, gKey, idx) {
-    var id = ['f', gKey, idx == null ? 'x' : idx, def.key].join('-');
-    var attrs = ' data-g="' + gKey + '" data-f="' + def.key + '"' + (idx != null ? ' data-i="' + idx + '"' : '');
+    var safeKey = escapeHtml(def.key);
+    var id = ['f', gKey, idx == null ? 'x' : idx, safeKey].join('-');
+    var attrs = ' data-g="' + gKey + '" data-f="' + safeKey + '"' + (idx != null ? ' data-i="' + idx + '"' : '');
     var val = FO.getResumeValue(resume, gKey + '.' + def.key, idx);
     val = escapeHtml(val);
     if (def.type === 'select') {
@@ -107,7 +108,12 @@
         item.innerHTML = '<label>' + f.label + (f.ext ? ' <span style="color:#94a3b8">(扩展)</span>' : '') + '</label>' + inputHtml(f, gKey, null);
         grid.appendChild(item);
       });
+      // 该组的自定义字段
+      FO.customKeysOf(resume, gKey).forEach(function (ck) {
+        grid.appendChild(customFieldItem(gKey, ck, null));
+      });
       bd.appendChild(grid);
+      bd.appendChild(addCustomFieldBtn(gKey));
     } else if (def.type === 'array') {
       var list = resume[gKey];
       (list.length ? list : [{}]).forEach(function (_, i) {
@@ -121,15 +127,22 @@
         renderAll(); save();
       });
       bd.appendChild(add);
+      bd.appendChild(addCustomFieldBtn(gKey));
     } else if (def.type === 'skills') {
       var sl = resume.skills.items;
       (sl.length ? sl : [{}]).forEach(function (_, i) {
         var seg = document.createElement('div');
         seg.className = 'seg';
+        var ckeys = FO.customKeysOf(resume, gKey);
+        var customHtml = ckeys.map(function (ck) {
+          return '<div class="fitem" style="flex:1"><label>' + escapeHtml(ck) + customTag() + delCustomBtnHtml(gKey, ck) + '</label>' +
+            inputHtml({ key: ck, label: ck, type: 'text' }, gKey, i) + '</div>';
+        }).join('');
         seg.innerHTML = '<div class="seg-hd"><span class="idx">技能 ' + (i + 1) + '</span>' + delBtn(gKey, i) + '</div>' +
           '<div class="frow">' +
           '<div class="fitem" style="flex:2"><label>技能 / 语言</label>' + inputHtml(def.fields[0], gKey, i) + '</div>' +
           '<div class="fitem"><label>熟练度</label>' + inputHtml(def.fields[1], gKey, i) + '</div>' +
+          customHtml +
           '</div>';
         bd.appendChild(seg);
       });
@@ -141,6 +154,7 @@
         renderAll(); save();
       });
       bd.appendChild(addSkill);
+      bd.appendChild(addCustomFieldBtn(gKey));
       var sa = def.extras[0];
       var saBox = document.createElement('div');
       saBox.style.marginTop = '10px';
@@ -178,15 +192,17 @@
     var def = FO.SCHEMA[gKey];
     var seg = document.createElement('div');
     seg.className = 'seg';
+    var ckeys = FO.customKeysOf(resume, gKey);
     var rows = [];
-    var fs = def.fields;
+    var fs = def.fields.slice();
+    ckeys.forEach(function (ck) { fs.push({ key: ck, label: ck, type: 'text', custom: true }); });
     for (var i = 0; i < fs.length; i += 2) {
       rows.push(fs.slice(i, i + 2));
     }
     var html = '<div class="seg-hd"><span class="idx">' + def.label.slice(0, 2) + '经历 ' + (idx + 1) + '</span>' + delBtn(gKey, idx) + '</div>';
     rows.forEach(function (pair) {
       html += '<div class="frow">' + pair.map(function (f) {
-        return '<div class="fitem"><label>' + f.label + '</label>' + inputHtml(f, gKey, idx) + '</div>';
+        return '<div class="fitem"><label>' + escapeHtml(f.label) + (f.custom ? customTag() + delCustomBtnHtml(gKey, f.key) : '') + '</label>' + inputHtml(f, gKey, idx) + '</div>';
       }).join('') + '</div>';
     });
     seg.innerHTML = html;
@@ -197,6 +213,54 @@
     return '<button class="seg-del" data-seg-del="' + gKey + '" data-seg-idx="' + idx + '">删除</button>';
   }
 
+  /** 自定义字段标签旁的小标记 */
+  function customTag() {
+    return ' <span style="color:#94a3b8">(自定义)</span>';
+  }
+
+  /** 自定义字段的删除按钮（放在 label 内） */
+  function delCustomBtnHtml(gKey, ck) {
+    return ' <button class="seg-del" data-custom-del-g="' + gKey + '" data-custom-del-k="' + escapeHtml(ck) + '" style="margin-left:4px">删除</button>';
+  }
+
+  /** object 组里单个自定义字段的表单项 */
+  function customFieldItem(gKey, ck, idx) {
+    var item = document.createElement('div');
+    item.className = 'fitem';
+    item.style.minWidth = '46%';
+    item.innerHTML = '<label>' + escapeHtml(ck) + customTag() + delCustomBtnHtml(gKey, ck) + '</label>' +
+      inputHtml({ key: ck, label: ck, type: 'text' }, gKey, idx);
+    return item;
+  }
+
+  /** 每组底部的「添加自定义字段」按钮 */
+  function addCustomFieldBtn(gKey) {
+    var btn = document.createElement('button');
+    btn.className = 'btn add-seg';
+    btn.textContent = '＋ 为本组添加自定义字段';
+    btn.addEventListener('click', function () {
+      var k = prompt('字段名（将作为匹配关键词，如「微信号」）');
+      if (!k) return;
+      k = k.trim();
+      if (!k) return;
+      var def = FO.SCHEMA[gKey];
+      var sk = def.fields.map(function (f) { return f.key; }).concat((def.extras || []).map(function (f) { return f.key; }));
+      if (sk.indexOf(k) !== -1) { alert('该字段已存在于本组预设字段中'); return; }
+      if (def.type === 'object') {
+        if (resume[gKey][k] !== undefined) { alert('该自定义字段已存在'); return; }
+        resume[gKey][k] = '';
+      } else if (def.type === 'array') {
+        if (resume[gKey].some(function (row) { return row[k] !== undefined; })) { alert('该自定义字段已存在'); return; }
+        resume[gKey].forEach(function (row) { row[k] = ''; });
+      } else if (def.type === 'skills') {
+        if (resume.skills.items.some(function (it) { return it[k] !== undefined; })) { alert('该自定义字段已存在'); return; }
+        resume.skills.items.forEach(function (it) { it[k] = ''; });
+      }
+      renderAll(); save();
+    });
+    return btn;
+  }
+
   function countFilled(gKey) {
     var def = FO.SCHEMA[gKey];
     var v = resume[gKey];
@@ -204,7 +268,8 @@
     if (def.type === 'array') return v.length + ' 条';
     if (def.type === 'skills') return (v.items.length + (v.selfAssessment ? 1 : 0)) + ' 项';
     if (def.type === 'custom') return Object.keys(v).length + ' 项';
-    return def.fields.filter(function (f) { return v[f.key]; }).length + ' 项';
+    // object 组：统计所有非空字段（含自定义）
+    return Object.keys(v).filter(function (k) { return v[k]; }).length + ' 项';
   }
 
   // ---------- 表单事件（委托） ----------
@@ -229,9 +294,25 @@
       renderAll(); save();
       return;
     }
-    var cdel = e.target.closest('[data-ck]');
+    // 删除某组内的自定义字段
+    var cdel = e.target.closest('[data-custom-del-g]');
     if (cdel) {
-      delete resume.custom[cdel.dataset.ck];
+      var cg = cdel.dataset.customDelG;
+      var ck = cdel.dataset.customDelK;
+      var cdef = FO.SCHEMA[cg];
+      if (cdef.type === 'object') {
+        delete resume[cg][ck];
+      } else if (cdef.type === 'array') {
+        resume[cg].forEach(function (row) { delete row[ck]; });
+      } else if (cdef.type === 'skills') {
+        resume.skills.items.forEach(function (it) { delete it[ck]; });
+      }
+      renderAll(); save();
+      return;
+    }
+    var cdel2 = e.target.closest('[data-ck]');
+    if (cdel2) {
+      delete resume.custom[cdel2.dataset.ck];
       renderAll(); save();
     }
   });
@@ -305,6 +386,7 @@
     var out = FO.normalizeResume(base);
     Object.keys(FO.SCHEMA).forEach(function (g) {
       var def = FO.SCHEMA[g];
+      var sk = def.fields.map(function (f) { return f.key; }).concat((def.extras || []).map(function (f) { return f.key; }));
       if (def.type === 'array') {
         (inc[g] || []).forEach(function (row) {
           var dup = out[g].some(function (r) {
@@ -312,11 +394,21 @@
               r.company && row.company && r.company === row.company ||
               r.name && row.name && r.name === row.name;
           });
-          if (!dup) out[g].push(row);
+          if (!dup) {
+            // 保留行内自定义字段
+            var nr = {};
+            def.fields.forEach(function (f) { nr[f.key] = row[f.key] || ''; });
+            Object.keys(row).forEach(function (k) { if (sk.indexOf(k) === -1) nr[k] = row[k]; });
+            out[g].push(nr);
+          }
         });
       } else if (def.type === 'skills') {
         (inc[g].items || []).forEach(function (it) {
-          if (!out[g].items.some(function (x) { return x.name === it.name; })) out[g].items.push(it);
+          if (!out[g].items.some(function (x) { return x.name === it.name; })) {
+            var nit = { name: it.name || '', level: it.level || '' };
+            Object.keys(it).forEach(function (k) { if (k !== 'name' && k !== 'level') nit[k] = it[k]; });
+            out[g].items.push(nit);
+          }
         });
         if (!out[g].selfAssessment && inc[g].selfAssessment) out[g].selfAssessment = inc[g].selfAssessment;
       } else if (def.type === 'custom') {
@@ -327,6 +419,12 @@
         def.fields.forEach(function (f) {
           if (!out[g][f.key] && inc[g][f.key]) out[g][f.key] = inc[g][f.key];
         });
+        // 合并 object 组的自定义字段
+        if (inc[g] && typeof inc[g] === 'object') {
+          Object.keys(inc[g]).forEach(function (k) {
+            if (sk.indexOf(k) === -1 && !out[g][k]) out[g][k] = inc[g][k];
+          });
+        }
       }
     });
     return out;
@@ -410,7 +508,11 @@
     chrome.runtime.sendMessage({ type: 'FO_EXPORT_SAMPLES' }, function (r) {
       if (!r || !r.ok) return;
       var lines = (r.rows || []).map(function (row) {
-        return JSON.stringify({ text: [row.signals.labelText, row.signals.placeholder, row.signals.name, row.signals.id].filter(Boolean).join(' | '), label: row.label });
+        var sig = row.signals || {};
+        var parts = [sig.labelText, sig.placeholder, sig.name, sig.id].filter(Boolean);
+        // 把 section 上下文（如「家庭」「教育」）拼进文本，让模型学到 section 消歧
+        if (row.contextText) parts.push('【' + row.contextText + '】');
+        return JSON.stringify({ text: parts.join(' | '), label: row.label });
       });
       var blob = new Blob([lines.join('\n')], { type: 'application/jsonl' });
       var a = document.createElement('a');
