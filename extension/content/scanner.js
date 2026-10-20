@@ -160,6 +160,31 @@
   }
 
   /**
+   * 日期子控件识别：placeholder 为「年/月/日」，或 select 的选项全是年份 / 1-12 月份。
+   * 这类控件自身没有字段名（标签就是"年""月"），必须由 matcher 聚合成区间单元后再成组填充。
+   */
+  var DATE_PART_PLACEHOLDER = { '年': 'year', '月': 'month', '日': 'day', '天': 'day' };
+
+  function datePartOf(el) {
+    var ph = String((el.getAttribute && el.getAttribute('placeholder')) || '').trim();
+    if (DATE_PART_PLACEHOLDER[ph]) return DATE_PART_PLACEHOLDER[ph];
+    if (el.tagName !== 'SELECT' || !el.options) return null;
+    var hasYear = false, hasMonth = false, n = Math.min(el.options.length, 60);
+    for (var i = 0; i < n; i++) {
+      var t = String((el.options[i] && el.options[i].text) || '').trim();
+      if (/^\d{4}\s*年?$/.test(t)) hasYear = true;
+      else if (/^\d{1,2}\s*月?$/.test(t)) {
+        var m = parseInt(t, 10);
+        if (m >= 1 && m <= 12) hasMonth = true;
+      }
+    }
+    if (hasYear && !hasMonth) return 'year';
+    if (hasMonth && !hasYear) return 'month';
+    return null;
+  }
+  FO.scanner.datePartOf = datePartOf;
+
+  /**
    * 附近上下文：向上找最近的语义容器，采集其中可能的区块标题文本。
    * 不仅限于 h1-h6，还包括容器自身开头的直接文本（很多表单把"家庭成员"写在 plain div 里），
    * 以及容器前一个兄弟元素（常见于"标题在上、表单在下"的布局）。
@@ -239,6 +264,7 @@
     var ctrl = {
       el: el,
       kind: kind,
+      datePart: datePartOf(el), // 'year' | 'month' | 'day' | null（年/月子控件，交给 matcher 聚合成日期区间）
       type: el.getAttribute('type') || (el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'textarea' : 'text')),
       signals: {
         name: name,

@@ -525,5 +525,61 @@
     };
   };
 
+  /* ---------------- 日期区间子控件（年/月 下拉）----------------
+   * 页面给的是「年下拉 + 月下拉」，简历里只有一个 "2018-09"。
+   * 原则：先预检每个子控件都能安全写入，只要有一个不确定就整组放弃 —— 半填的日期比不填更糟。
+   */
+
+  /** 从 "YYYY-MM(-DD)" / "YYYY年M月" 解析出年、月 */
+  function parseYearMonth(v) {
+    var s = String(v == null ? '' : v);
+    var m = s.match(/(\d{4})\s*[-/年.]\s*(\d{1,2})?/);
+    if (m) return { year: m[1], month: m[2] ? pad(m[2]) : null };
+    var y = s.match(/^(\d{4})$/);
+    return y ? { year: y[1], month: null } : null;
+  }
+
+  /** 原生下拉里按"数字相等"挑年/月选项（选项文本可能是 "2018"、"2018年"、"9月"、"09"） */
+  function pickDateOption(select, want) {
+    var w = String(want == null ? '' : want).replace(/\D/g, '');
+    if (!w) return null;
+    var opts = Array.prototype.slice.call(select.options || []);
+    var hit = opts.find(function (o) { return String(o.text).replace(/\D/g, '') === w; }) ||
+      opts.find(function (o) { return String(o.value).replace(/\D/g, '') === w; });
+    if (hit) return hit;
+    var wn = String(parseInt(w, 10));
+    return opts.find(function (o) {
+      var t = String(o.text).replace(/\D/g, '');
+      return t && String(parseInt(t, 10)) === wn;
+    }) || null;
+  }
+
+  /** 年/月子控件写值预检：返回要写入的文本，或 null（无法安全写入） */
+  FO.filler.datePartOption = function (el, part, isoValue) {
+    var ym = parseYearMonth(isoValue);
+    if (!ym) return null;
+    var want = part === 'year' ? ym.year : (part === 'month' ? ym.month : null);
+    if (!want) return null;
+    if (el.tagName === 'SELECT') return pickDateOption(el, want) ? want : null;
+    return want;
+  };
+
+  /** 写一个「年/月」子控件 */
+  FO.filler.fillDatePart = function (el, part, isoValue) {
+    var want = FO.filler.datePartOption(el, part, isoValue);
+    if (want == null) return { ok: false, message: '日期子控件无法匹配（' + part + '）' };
+    undoPush(el);
+    if (el.tagName === 'SELECT') {
+      el.value = pickDateOption(el, want).value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      setNativeValue(el, want);
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
+    return { ok: true, message: '' };
+  };
+
   FO.filler.fillControlValue = setNativeValue;
+  FO.filler.parseYearMonth = parseYearMonth;
 })(typeof self !== 'undefined' ? self : globalThis);

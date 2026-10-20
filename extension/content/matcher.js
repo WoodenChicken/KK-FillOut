@@ -378,6 +378,7 @@
       if (idxs.length !== 2) return;
       var a = results[idxs[0]], b = results[idxs[1]];
       if (!a || !b || a.key === b.key) return;
+      if (a.dateGroup || b.dateGroup) return; // 日期区间已由 bindDateGroups 处理
       function isDateish(r) {
         return /Date$/.test(r.key) || (r.ctrl && (r.ctrl.type === 'date' || r.ctrl.type === 'month' || /时间|日期/.test(r.ctrl.signals.labelText || '')));
       }
@@ -443,6 +444,212 @@
           }
         }
       }
+    });
+  }
+
+  /* ---------------- 日期区间（年/月 下拉）成组识别 ----------------
+   * 国内 ATS（Moka / 北森等）的「起止时间」常由「年下拉 + 月下拉」两组子控件构成。
+   * 子控件自身标签只有"年""月"，单独打分会命中错误字段甚至落空，所以这里把它们聚合成
+   * 一个"日期单元"：用单元标签（如"入学时间""起止时间"）整体确定字段，再按
+   * 前半 = 开始、后半 = 结束 拆分到 startDate / endDate；单值日期（如"出生年月"）则共用同一字段。
+   * 结果以一条 match 表示（携带 dateGroup），由 content.js/filler.js 成组写入。
+   */
+
+  // 显式日期区间容器（Moka 的 .month-range-select / .date_info 等）
+  var DATE_BOX_SELECTOR = '[class*="month-range"],[class*="date-range"],[class*="dateRange"]' +
+    ',[class*="date_info"],[class*="dateInfo"],[class*="range-select"],[class*="daterange"]';
+
+  // 字段行容器：用于把日期子控件限定在同一行内聚类，避免把相邻两个区间并成一个
+  var ROW_SELECTOR = 'tr,li,dd,[class*="form-item"],[class*="form_item"],[class*="form-group"]' +
+    ',[class*="field-item"],[class*="field_item"],[class*="date"],[class*="time"],[class*="period"],[class*="range"]';
+
+  // "区间型"标签：一个标签同时覆盖开始与结束（如"起止时间""就读时间"）
+  var RANGE_LABEL_RE = /起止|时间区间|起至|起始时间|结束时间|就读时间|在职时间|入学时间|离职时间|实习时间|工作时间|项目时间/;
+
+  function isDatePartCtrl(c) {
+    if (!c) return false;
+    if (c.datePart) return true;
+    if (c.el && FO.scanner && FO.scanner.datePartOf) {
+      var p = FO.scanner.datePartOf(c.el);
+      if (p) { c.datePart = p; return true; }
+    }
+    return false;
+  }
+
+  function dateRowBox(el) { return (el && el.closest) ? el.closest(ROW_SELECTOR) : null; }
+
+  /** 把日期子控件聚成若干单元：先按显式容器，再按同一行内的连续子控件（上限 4 = 年/月 × 起止） */
+  function clusterDateParts(controls) {
+    var idxs = [];
+    for (var i = 0; i < controls.length; i++) if (isDatePartCtrl(controls[i])) idxs.push(i);
+    if (idxs.length < 2) return [];
+    var used = {}, clusters = [];
+
+    idxs.forEach(function (i) {
+      if (used[i]) return;
+      var el = controls[i].el;
+      var box = (el && el.closest) ? el.closest(DATE_BOX_SELECTOR) : null;
+      if (!box) return;
+      var members = idxs.filter(function (j) {
+        return !used[j] && controls[j].el && controls[j].el.closest &&
+          controls[j].el.closest(DATE_BOX_SELECTOR) === box;
+      });
+      if (members.length < 2) return;
+      members.forEach(function (j) { used[j] = 1; });
+      clusters.push(members);
+    });
+
+    for (var a = 0; a < idxs.length; a++) {
+      var i2 = idxs[a];
+      if (used[i2]) continue;
+      var run = [i2]; used[i2] = 1;
+      var rowI = dateRowBox(controls[i2].el);
+      for (var b = a + 1; b < idxs.length && run.length < 4; b++) {
+        var j2 = idxs[b];
+        if (used[j2]) continue;
+        var rowJ = dateRowBox(controls[j2].el);
+        if (rowI && rowJ && rowI !== rowJ) break; // 换了字段行：不并组
+        used[j2] = 1; run.push(j2);
+        if (run.length >= 4) break;
+      }
+      if (run.length >= 2) clusters.push(run);
+    }
+    return clusters;
+  }
+
+  function cleanDateLabel(s) {
+    return String(s == null ? '' : s)
+      .replace(/[（(][^）)]{0,12}[）)]/g, ' ')
+      .replace(/[*＊]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /** 去掉"年/月/日"这类部件词，只留字段名本体（"就读时间 年" → "就读时间"） */
+  function stripDateTokens(s) {
+    return cleanDateLabel(s)
+      .split(/\s+/)
+      .filter(function (w) { return !/^[年月日天]$/.test(w); })
+      .join(' ')
+      .replace(/[年月日天]\s*$/g, '')
+      .replace(/[：:]/g, '')
+      .trim();
+  }
+
+  function labelQuality(t) {
+    return !!t && t.length >= 2 && t.length <= 30 && !/^\d+$/.test(t) && !/\d{4}/.test(t);
+  }
+
+  /** 日期单元的标签：优先子控件自身标签，其次行容器内的 label，最后退到区块上下文 */
+  function dateGroupLabel(parts) {
+    for (var i = 0; i < parts.length; i++) {
+      var t = stripDateTokens(parts[i].signals.labelText);
+      if (labelQuality(t)) return t;
+    }
+    var box = dateRowBox(parts[0].el);
+    if (box) {
+      var labs = box.querySelectorAll('label,.label,[class*="label"],[class*="title"]');
+      for (var j = 0; j < labs.length; j++) {
+        if (labs[j].querySelector('select,input,textarea')) continue;
+        var lt = stripDateTokens(labs[j].textContent);
+        if (labelQuality(lt)) return lt;
+      }
+    }
+    var ct = stripDateTokens(parts[0].contextText);
+    return labelQuality(ct) ? ct : '';
+  }
+
+  /** 用一个"标签"去词典里找最合适的字段 key（全等/前缀优先，其次更长的 pattern） */
+  function labelMatchKey(label) {
+    if (!label) return null;
+    var bestKey = null, bestScore = 0, bestLen = 0;
+    Object.keys(DICT).forEach(function (key) {
+      DICT[key].forEach(function (pat) {
+        var ps = patternScore(label, pat);
+        if (ps <= 0) return;
+        var len = norm(pat).length;
+        if (ps > bestScore || (ps === bestScore && len > bestLen)) {
+          bestScore = ps; bestLen = len; bestKey = key;
+        }
+      });
+    });
+    return bestKey ? { key: bestKey, score: bestScore } : null;
+  }
+
+  function hasDatePair(groupKey) {
+    var def = FO.SCHEMA[groupKey];
+    if (!def || !def.fields) return false;
+    var keys = def.fields.map(function (f) { return f.key; });
+    return keys.indexOf('startDate') !== -1 && keys.indexOf('endDate') !== -1;
+  }
+
+  /** 由标签推出日期字段：起止 → start+end；单值 → 单个字段 */
+  function resolveDateKeys(label, ctxCtrl) {
+    var hit = labelMatchKey(label);
+    if (hit) {
+      var g = FO.groupOf(hit.key);
+      if (/startDate$/.test(hit.key)) return { startKey: hit.key, endKey: g + '.endDate', score: hit.score };
+      if (/endDate$/.test(hit.key)) return { startKey: g + '.startDate', endKey: hit.key, score: hit.score };
+      return { singleKey: hit.key, score: hit.score };
+    }
+    if (RANGE_LABEL_RE.test(label || '')) {
+      var sec = detectSectionGroup(ctxCtrl);
+      if (sec && hasDatePair(sec)) return { startKey: sec + '.startDate', endKey: sec + '.endDate', score: 0.88 };
+    }
+    return null;
+  }
+
+  /** 同一行内的"至今"复选框（区间结束为"至今"时勾选它） */
+  function findUntilBox(controls, partEl) {
+    var box = dateRowBox(partEl) || (partEl && partEl.parentElement);
+    if (!box) return null;
+    for (var i = 0; i < controls.length; i++) {
+      var c = controls[i];
+      if (!c || c.kind !== 'checkbox' || !c.el) continue;
+      if (!box.contains(c.el)) continue;
+      var t = norm((c.signals.labelText || '') + ' ' + (c.signals.name || ''));
+      if (/至今|现在|present|now/.test(t)) return c.el;
+    }
+    return null;
+  }
+
+  function bindDateGroups(controls, results, settings) {
+    var clusters = clusterDateParts(controls);
+    if (!clusters.length) return;
+    clusters.forEach(function (idxs) {
+      var parts = idxs.map(function (i) { return controls[i]; });
+      var label = dateGroupLabel(parts);
+      var keys = resolveDateKeys(label, parts[0]);
+      if (!keys) return;
+
+      // 单元内 >=2 个"年"部件（或部件数 >=3）视为区间（开始+结束），否则是单值日期
+      var yearCount = parts.filter(function (c) { return c.datePart === 'year'; }).length;
+      var isRange = keys.singleKey ? false : (yearCount >= 2 || parts.length >= 3);
+
+      var half = Math.floor(parts.length / 2);
+      var plan = [], ok = true;
+      parts.forEach(function (c, k) {
+        var key = isRange ? (k < half ? keys.startKey : keys.endKey) : (keys.singleKey || keys.startKey);
+        if (!key) { ok = false; return; }
+        plan.push({ el: c.el, key: key, datePart: c.datePart });
+      });
+      if (!ok || !plan.length) return;
+
+      var score = keys.score || 0.9;
+      // 用首个子控件的位置承载整组匹配，其余置空：保持 results 与 controls 索引一一对应，
+      // 否则后续 pairDates / pairFamilyRelation / assignSegments 按索引取 controls 会错位甚至崩溃。
+      results[idxs[0]] = {
+        id: 'dg' + idxs.join('_'),
+        ctrl: parts[0],
+        key: plan[0].key,
+        score: Math.round(score * 1000) / 1000,
+        source: 'date-range',
+        candidates: plan.map(function (p) { return { key: p.key, score: score }; }),
+        tier: tierOf(score, settings),
+        segmentIdx: 0,
+        dateGroup: { parts: plan, untilEl: findUntilBox(controls, parts[0].el), label: label, isRange: isRange }
+      };
+      for (var t = 1; t < idxs.length; t++) results[idxs[t]] = null;
     });
   }
 
@@ -517,6 +724,7 @@
       });
     }
 
+    bindDateGroups(controls, results, settings);
     pairDates(controls, results);
     pairFamilyRelation(controls, results);
     assignSegments(results, resume);

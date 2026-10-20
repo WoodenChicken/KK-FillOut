@@ -151,7 +151,42 @@
     return v;
   }
 
+  /**
+   * 日期区间（年/月 下拉）成组填充：把简历里的 "2018-09" 拆到「年」「月」子控件。
+   * 预检不通过就整组放弃 —— 半填的日期比不填更糟。
+   */
+  function fillDateGroupMatch(m, segIdx) {
+    var dg = m.dateGroup;
+    var idx = segIdx != null ? segIdx : m.segmentIdx;
+    var plan = [];
+    dg.parts.forEach(function (p) {
+      plan.push({ el: p.el, part: p.datePart, key: p.key, value: FO.getResumeValue(state.resume, p.key, idx) });
+    });
+    if (!plan.length || !plan[0].value) return { ok: false, message: '简历中无值' };
+    // 区间必须成对：缺结束值时若有「至今」勾选框则只填开始，否则整组放弃
+    if (plan.some(function (p) { return !p.value; })) {
+      if (!dg.untilEl) return { ok: false, message: '日期区间不完整，已跳过' };
+      var startKey = dg.parts[0].key;
+      plan = plan.filter(function (p) { return p.key === startKey && p.value; });
+      if (!plan.length) return { ok: false, message: '简历中无值' };
+    }
+    for (var i = 0; i < plan.length; i++) {
+      if (FO.filler.datePartOption(plan[i].el, plan[i].part, plan[i].value) == null) {
+        return { ok: false, message: '日期下拉无匹配项，已跳过' };
+      }
+    }
+    var wrote = 0;
+    for (var j = 0; j < plan.length; j++) {
+      var r = FO.filler.fillDatePart(plan[j].el, plan[j].part, plan[j].value);
+      if (!r.ok) return { ok: wrote > 0, message: r.message };
+      wrote++;
+    }
+    if (dg.untilEl) { try { if (!dg.untilEl.checked) dg.untilEl.click(); } catch (e) { /* noop */ } }
+    return { ok: true, message: '' };
+  }
+
   function fillMatch(m, forcedValue, segIdx) {
+    if (m.dateGroup) return fillDateGroupMatch(m, segIdx);
     var v = forcedValue != null ? forcedValue : valueFor(m);
     if (!v) return { ok: false, message: '简历中无值' };
     var adapter = state.adapter;
