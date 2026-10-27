@@ -94,6 +94,24 @@
       <div class="hint">置信度 ≥ 自动阈值：一键填充直接写入；介于两阈值之间：点角标确认后填入；低于确认阈值：仅标记不填。</div>
 
       <div class="divider"></div>
+      <h3>拟人化填充（规避机器检测）</h3>
+      <div class="setting-line">
+        <span>填充节奏</span>
+        <select id="set-speed">
+          <option value="fast">快速</option>
+          <option value="normal">正常（推荐）</option>
+          <option value="slow">慢速</option>
+        </select>
+      </div>
+      <label class="setting-line">
+        <input type="checkbox" id="set-typing" /> 逐字符模拟键盘输入（更自然，速度更慢）
+      </label>
+      <div class="hint">
+        字段按随机间隔逐个填入（含随机长停顿），写入前模拟鼠标悬停与聚焦，避免整页字段在同一时刻写完全部值被判定为机器操作。<br />
+        说明：内容脚本派发的事件 <code>isTrusted</code> 恒为 <code>false</code>，本功能只能弱化「速度与事件序列」特征，无法完全绕过基于可信事件的检测。
+      </div>
+
+      <div class="divider"></div>
       <h3>训练样本（在线学习，仅本地）</h3>
       <div class="row between">
         <span id="samples-count">本地样本：0 条</span>

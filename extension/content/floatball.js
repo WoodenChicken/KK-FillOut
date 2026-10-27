@@ -199,6 +199,28 @@
     setTimeout(function () { t.remove(); }, 2200);
   }
 
+  // 进度提示：拟人化填充逐个字段推进时会高频刷新，复用同一个元素避免刷屏
+  var progressEl = null;
+
+  FO.floatball.progress = function (msg) {
+    if (!ensure()) return;
+    if (!progressEl) {
+      progressEl = document.createElement('div');
+      progressEl.className = 'toast fo-progress';
+      shadow.appendChild(progressEl);
+    }
+    progressEl.style.opacity = '1';
+    progressEl.textContent = msg;
+  };
+
+  FO.floatball.progressEnd = function () {
+    if (!progressEl) return;
+    progressEl.style.opacity = '0';
+    var el = progressEl;
+    progressEl = null;
+    setTimeout(function () { el.remove(); }, 220);
+  };
+
   /** content.js 推送状态进来 */
   FO.floatball.setState = function (state) {
     if (!ensure()) return;

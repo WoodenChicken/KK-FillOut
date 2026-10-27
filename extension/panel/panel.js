@@ -21,6 +21,8 @@
       $('#set-ml').checked = st.mlEnabled;
       $('#set-auto').value = st.autoFillThreshold; $('#set-auto-v').textContent = st.autoFillThreshold;
       $('#set-confirm').value = st.confirmThreshold; $('#set-confirm-v').textContent = st.confirmThreshold;
+      $('#set-speed').value = st.fillSpeed || 'normal';
+      $('#set-typing').checked = !!st.humanTyping;
       cb();
     });
   }
@@ -479,6 +481,8 @@
   // ---------- 设置 ----------
   $('#set-highlight').addEventListener('change', persistSettings);
   $('#set-ml').addEventListener('change', persistSettings);
+  $('#set-speed').addEventListener('change', persistSettings);
+  $('#set-typing').addEventListener('change', persistSettings);
   $('#set-auto').addEventListener('input', function () {
     $('#set-auto-v').textContent = this.value;
     persistSettings();
@@ -494,6 +498,8 @@
       st.mlEnabled = $('#set-ml').checked;
       st.autoFillThreshold = +$('#set-auto').value;
       st.confirmThreshold = +$('#set-confirm').value;
+      st.fillSpeed = $('#set-speed').value;
+      st.humanTyping = $('#set-typing').checked;
       chrome.storage.local.set({ settings: st });
     });
   }

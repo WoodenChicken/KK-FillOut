@@ -9,16 +9,22 @@
 
   var undoStack = [];
 
-  /** 以原生 setter 赋值绕过 React valueTracker，再派发 input/change */
-  function setNativeValue(el, value) {
+  /**
+   * 以原生 setter 赋值绕过 React valueTracker。
+   * dispatch: 'change' 派发 input+change（默认）；'input' 只派发 input（逐字符输入用）；false 不派发。
+   */
+  function writeNative(el, value, dispatch) {
     var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
       (el instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
     var desc = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
     if (desc && desc.set) desc.set.call(el, value);
     else el.value = value;
+    if (dispatch === false) return;
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (dispatch === 'change') el.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  function setNativeValue(el, value) { writeNative(el, value, 'change'); }
 
   function norm(s) { return FO.matcher.norm(s); }
 
@@ -41,11 +47,69 @@
 
   function pad(n) { n = String(n || ''); return n.length === 1 ? '0' + n : n; }
 
+  function isRegionKey(key) {
+    return /^(basicInfo\.(nativePlace|currentCity|expectedCity))$/.test(key || '');
+  }
+
+  function stripRegionSuffix(name) {
+    return String(name || '')
+      .replace(/(维吾尔自治区|壮族自治区|回族自治区|特别行政区|自治区|自治州|地区)$/g, '')
+      .replace(/(省|市|盟)$/g, '')
+      .trim();
+  }
+
+  function pushAlias(out, v) {
+    var n = norm(v);
+    if (n && out.indexOf(n) === -1) out.push(n);
+  }
+
+  function regionValueAliases(value) {
+    var out = [];
+    var text = String(value == null ? '' : value).trim();
+    if (!text) return out;
+    pushAlias(out, text);
+    if (FO.region && FO.region.parse) {
+      var parsed = FO.region.parse(text);
+      if (parsed) {
+        pushAlias(out, parsed.province);
+        pushAlias(out, stripRegionSuffix(parsed.province));
+        pushAlias(out, parsed.city);
+        pushAlias(out, stripRegionSuffix(parsed.city));
+      }
+    }
+    var dm = text.match(/([\u4e00-\u9fa5]{1,12}(?:区|县|旗|市))/g) || [];
+    dm.forEach(function (x) {
+      pushAlias(out, x);
+      pushAlias(out, stripRegionSuffix(x));
+    });
+    return out;
+  }
+
+  function candidateAliases(key, value) {
+    var out = valueAliases(key, value).slice();
+    if (isRegionKey(key)) {
+      regionValueAliases(value).forEach(function (a) {
+        if (out.indexOf(a) === -1) out.push(a);
+      });
+    }
+    return out;
+  }
+
+  function readonlyChooserFallbackValue(key, value) {
+    if (!isRegionKey(key)) return String(value == null ? '' : value);
+    var parsed = FO.region && FO.region.parse ? FO.region.parse(value) : null;
+    if (!parsed) return String(value == null ? '' : value);
+    var province = stripRegionSuffix(parsed.province || '');
+    var city = stripRegionSuffix(parsed.city || '');
+    if (province && city) return province + '/' + city;
+    return province || city || String(value == null ? '' : value);
+  }
+
   /** select 选项匹配：文本 → value → 包含 → 归一化包含，支持别名映射 */
   function pickOption(select, value, key) {
     var want = norm(value);
     if (!want) return null;
-    var aliases = valueAliases(key || '', value);
+    var aliases = candidateAliases(key || '', value);
     var opts = Array.prototype.slice.call(select.options || []);
     var v;
     v = opts.find(function (o) { return aliases.some(function (a) { return norm(o.text) === a || norm(o.value) === a; }); });
@@ -56,14 +120,11 @@
     if (v) return { opt: v, fuzzy: false };
     // 去掉"请选择"类占位项再做包含匹配
     var real = opts.filter(function (o) { return !/^(请选择|请选择|select|choose|-{2,}|全部|不限)$/.test(norm(o.text)); });
-    v = real.find(function (o) { return norm(o.text).indexOf(want) !== -1 || want.indexOf(norm(o.text)) !== -1 && norm(o.text).length >= 2; });
+    v = real.find(function (o) {
+      var t = norm(o.text);
+      return aliases.some(function (a) { return t.indexOf(a) !== -1 || (a.indexOf(t) !== -1 && t.length >= 2); });
+    });
     if (v) return { opt: v, fuzzy: true };
-    // 级联城市：'浙江省杭州市' 拆词
-    var region = FO.region.parse(value);
-    if (region && region.city) {
-      v = real.find(function (o) { return norm(o.text).indexOf(norm(region.city)) !== -1; });
-      if (v) return { opt: v, fuzzy: true };
-    }
     return null;
   }
 
@@ -100,6 +161,21 @@
               v += '-01';
               result.fuzzy = true;
             }
+          }
+          // 逐字符模拟键盘输入（拟人化可选开关）：只对普通文本/多行文本生效，
+          // 日期类控件由组件自行解析、逐字符写入会破坏取值，故仍走一次性赋值。
+          if (!isDateish && opts.typed && FO.humanize && FO.humanize.typeInto) {
+            undoPush(el);
+            result.ok = true;
+            result.async = true;
+            result.promise = FO.humanize.typeInto(el, v, opts.settings).then(function () {
+              if (opts.blur !== false) {
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                el.dispatchEvent(new Event('focusout', { bubbles: true }));
+              }
+              return true;
+            });
+            break;
           }
           undoPush(el);
           setNativeValue(el, v);
@@ -164,7 +240,7 @@
           // 异步流程，先回 ok + async，由 fillCombobox 完成后自行 toast 结果。
           result.ok = true;
           result.async = true;
-          fillCombobox(ctrl, value);
+          result.promise = fillCombobox(ctrl, value);
           break;
         }
         default:
@@ -207,34 +283,47 @@
     });
   }
 
+  function comboboxPopupRoot(el) {
+    // Layui：下拉 dl 与只读输入框同在一个 .layui-form-select 容器内
+    var layuiBox = el.closest ? el.closest('.layui-form-select') : null;
+    if (layuiBox) {
+      var dl = layuiBox.querySelector('dl');
+      if (dl && dl.getClientRects().length) return dl;
+    }
+    var listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    var root = listId ? document.getElementById(listId) : null;
+    if (root && root.getClientRects().length) return root;
+    var dds = document.querySelectorAll(
+      '.ant-select-dropdown:not(.ant-select-dropdown-hidden),' +
+      '[class*="select-dropdown"]:not([class*="dropdown-hidden"]),' +
+      '[class*="select-popup"]:not([class*="popup-hidden"]),' +
+      '[class*="phoenix-select"]:not([class*="hidden"]),' +
+      '[class*="phoenix-popup"]:not([class*="hidden"]),' +
+      '.el-select-dropdown:not(.is-hidden),' +
+      '[class*="van-popup"]:not([class*="hidden"]),' +
+      '.t-select__dropdown,.t-select-input__dropdown,.t-cascader__dropdown,.t-popup'
+    );
+    for (var i = dds.length - 1; i >= 0; i--) {
+      if (dds[i].getClientRects().length) return dds[i];
+    }
+    return null;
+  }
+
+  function comboboxOptionsFromRoot(root) {
+    if (!root) return [];
+    var nodes = root.querySelectorAll(
+      '.ant-select-item-option,[role="option"],.ant-select-tree-treenode,[role="treeitem"],' +
+      '.t-select-option,.t-cascader__item,.t-list-item,' +
+      '[class*="select-option"],[class*="select-item"],[class*="option-item"],' +
+      'li,dd:not(.layui-select-tips)'
+    );
+    return Array.prototype.filter.call(nodes, function (n) { return n.getClientRects().length > 0; });
+  }
+
   /** 当前 combobox 输入框对应的下拉选项：优先 aria-controls 精确定位，退回最后一个可见下拉。
    *  覆盖 antd Select（option）、Phoenix Select、TreeSelect/Cascader（tree 节点）；虚拟列表只看已渲染的可见项。 */
   function comboboxOptions(el) {
-    var listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
-    var root = listId ? document.getElementById(listId) : null;
-    if (!root) {
-      // 兼容 antd / Phoenix / Element / Vant 等组件库的下拉面板
-      var dds = document.querySelectorAll(
-        '.ant-select-dropdown:not(.ant-select-dropdown-hidden),' +
-        '[class*="select-dropdown"]:not([class*="dropdown-hidden"]),' +
-        '[class*="select-popup"]:not([class*="popup-hidden"]),' +
-        '[class*="phoenix-select"]:not([class*="hidden"]),' +
-        '[class*="phoenix-popup"]:not([class*="hidden"]),' +
-        '.el-select-dropdown:not(.is-hidden),' +
-        '[class*="van-popup"]:not([class*="hidden"])'
-      );
-      for (var i = dds.length - 1; i >= 0; i--) {
-        if (dds[i].getClientRects().length) { root = dds[i]; break; }
-      }
-    }
-    if (!root) return [];
-    // 兼容多种组件库的选项元素
-    var nodes = root.querySelectorAll(
-      '.ant-select-item-option,[role="option"],.ant-select-tree-treenode,[role="treeitem"],' +
-      '[class*="select-option"],[class*="select-item"],[class*="option-item"],' +
-      'li'
-    );
-    return Array.prototype.filter.call(nodes, function (n) { return n.getClientRects().length > 0; });
+    return comboboxOptionsFromRoot(comboboxPopupRoot(el));
   }
 
   function optionText(o) {
@@ -255,10 +344,43 @@
   function comboboxSelected(el) {
     // Phoenix: 选中值直接在 input.value 里
     if (el.value) return norm(el.value);
-    var box = el.closest('.ant-select,[class*="select"],[class*="picker"]') || el;
-    var items = box.querySelectorAll('.ant-select-selection-item,[class*="selection-item"]');
+    var box = el.closest('.ant-select,.t-select,.t-cascader,[class*="select"],[class*="picker"],[class*="cascader"]') || el;
+    var items = box.querySelectorAll('.ant-select-selection-item,.t-input__inner,[class*="selection-item"]');
     if (items.length) return norm(items[items.length - 1].textContent || '');
     return norm(box.textContent || '');
+  }
+
+  function pickByAliases(opts, aliases) {
+    if (!opts.length || !aliases.length) return null;
+    var texts = opts.map(function (o) { return optionText(o); });
+    var i = texts.findIndex(function (t) { return aliases.indexOf(t) !== -1; });
+    if (i === -1) i = texts.findIndex(function (t) {
+      return t && aliases.some(function (a) { return t.indexOf(a) !== -1 || (a.indexOf(t) !== -1 && t.length >= 2); });
+    });
+    return i === -1 ? null : { el: opts[i], fuzzy: texts[i] !== aliases[0] };
+  }
+
+  function clickRegionPath(el, value) {
+    var parsed = FO.region && FO.region.parse ? FO.region.parse(value) : null;
+    if (!parsed || !parsed.province) return Promise.resolve(null);
+    var provinceAliases = regionValueAliases(parsed.province);
+    var cityAliases = parsed.city ? regionValueAliases(parsed.city) : [];
+    var root = null;
+    return waitFor(function () {
+      root = comboboxPopupRoot(el);
+      var p = pickByAliases(comboboxOptionsFromRoot(root), provinceAliases);
+      if (!p || !p.el) return null;
+      p.el.click();
+      return true;
+    }, 1800).then(function () {
+      if (!cityAliases.length) return true;
+      return waitFor(function () {
+        var c = pickByAliases(comboboxOptionsFromRoot(root || comboboxPopupRoot(el)), cityAliases);
+        if (!c || !c.el) return null;
+        c.el.click();
+        return true;
+      }, 1800);
+    });
   }
 
   /**
@@ -271,19 +393,37 @@
     var el = ctrl.el;
     var want = norm(String(value));
     var key = ctrl._matchKey || '';
+    var aliases = candidateAliases(key, value);
     try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* noop */ }
     // Phoenix 等组件用 click 打开下拉；antd 用 mousedown
     el.click();
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-    waitFor(function () { return comboboxOptions(el).length ? true : null; }, 5000)
+    // 返回 Promise：调用方（拟人化串行填充）需等下拉真正落值后再处理下一个字段，
+    // 否则下一个字段的悬停/滚动会打断仍在展开的下拉。
+    return waitFor(function () { return comboboxOptions(el).length ? true : null; }, 5000)
       .then(function () {
+        if (isRegionKey(key)) {
+          return clickRegionPath(el, value).then(function (ok) { return ok ? '__done__' : '__continue__'; });
+        }
+        return '__continue__';
+      })
+      .then(function (special) {
+        if (special === '__done__') return '__done__';
         // 选项在 focus 时才异步拉取，等首批到位再写搜索词
         var editable = !el.readOnly;
         if (editable && want) setNativeValue(el, String(value));
         return waitFor(function () { return pickInWithAlias(comboboxOptions(el), want, key); }, 5000);
       })
       .then(function (pick) {
+        if (pick === '__done__') {
+          return waitFor(function () {
+            var cur0 = comboboxSelected(el);
+            return cur0 && aliases.some(function (a) {
+              return cur0 === a || cur0.indexOf(a) !== -1 || (a.indexOf(cur0) !== -1 && cur0.length >= 2);
+            }) ? cur0 : null;
+          }, 2000);
+        }
         if (!pick) {
           var rest = comboboxOptions(el);
           pick = rest.length ? { el: rest[0], fuzzy: true } : null;
@@ -292,7 +432,9 @@
         else commitEnter(el); // 没等到选项：回车赌一把搜索直选
         return waitFor(function () {
           var cur = comboboxSelected(el);
-          return cur && (cur.indexOf(want) !== -1 || (want.indexOf(cur) !== -1 && cur.length >= 2)) ? cur : null;
+          return cur && aliases.some(function (a) {
+            return cur === a || cur.indexOf(a) !== -1 || (a.indexOf(cur) !== -1 && cur.length >= 2);
+          }) ? cur : null;
         }, 2000);
       })
       .then(function (ok) {
@@ -300,8 +442,18 @@
           FO.floatball.toast('已填入下拉：' + String(value).slice(0, 24));
         } else if (attempt < 1) {
           commitEscape(el);
-          setTimeout(function () { fillCombobox(ctrl, value, attempt + 1); }, 350);
+          return new Promise(function (res) { setTimeout(res, 350); })
+            .then(function () { return fillCombobox(ctrl, value, attempt + 1); });
         } else {
+          if (el.readOnly && /(^|\s)t-input__inner(\s|$)/.test(String(el.className || ''))) {
+            var fv = readonlyChooserFallbackValue(key, value);
+            try {
+              setNativeValue(el, fv);
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+              FO.floatball.toast('已写入下拉：' + String(fv).slice(0, 24) + '（请核对）');
+              return;
+            } catch (e) { /* 继续走失败提示 */ }
+          }
           FO.floatball.toast('下拉未能匹配：' + String(value).slice(0, 24) + '，请手动选择');
         }
       })
@@ -311,7 +463,7 @@
   /** 带别名映射的选项匹配 */
   function pickInWithAlias(opts, want, key) {
     if (!opts.length) return null;
-    var aliases = valueAliases(key || '', want);
+    var aliases = candidateAliases(key || '', want);
     var texts = opts.map(function (o) { return optionText(o); });
     // 1) 别名全等
     var i = texts.findIndex(function (t) { return aliases.indexOf(t) !== -1; });

@@ -118,5 +118,20 @@ function find(matches, el) { return matches.find((m) => m.ctrl.el === el); }
   assert('家庭成员区-工作单位->family.workUnit', m[0].key, 'family.workUnit');
 }
 
+// ---- 9. 教育摘要字段（全日制院校等）不能抢占教育经历数组的段号 ----
+{
+  const summary = {}, schoolA = {}, schoolB = {};
+  const ctrls = [
+    ctrl('全日制院校', '教育信息', summary),
+    ctrl('学校名称', '教育经历', schoolA),
+    ctrl('学校名称', '教育经历', schoolB)
+  ];
+  const resume = resumeWith('education', [{ school: '本科院校' }, { school: '硕士院校' }]);
+  const m = FO.matcher.matchAll(ctrls, resume, settings);
+  assert('教育摘要字段不应命中 education.school', !!find(m, summary), false);
+  assert('教育经历-第1段学校->education.school#0', find(m, schoolA).key + '#' + find(m, schoolA).segmentIdx, 'education.school#0');
+  assert('教育经历-第2段学校->education.school#1', find(m, schoolB).key + '#' + find(m, schoolB).segmentIdx, 'education.school#1');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail > 0 ? 1 : 0);

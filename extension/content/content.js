@@ -19,7 +19,9 @@
     mlRequested: false,
     lastFocused: null, // 用户最后聚焦的页面控件（手动填写目标）
     totalControls: 0,  // 本页表单控件总数（用于命中率计算）
-    ocrIdentified: 0   // 视觉识别关联到标签的控件数
+    ocrIdentified: 0,  // 视觉识别关联到标签的控件数
+    filling: false,    // 拟人化串行填充进行中
+    fillToken: 0       // 填充取消令牌（递增即作废进行中的队列）
   };
 
   // ---------- 存储装载 ----------
@@ -68,11 +70,20 @@
   }
 
   // ---------- 扫描 + 匹配 ----------
-  var scanning = false, rescanTimer = null;
+  var scanning = false, rescanTimer = null, lastScanAt = 0;
+  // 两次自动重扫之间的最小间隔：切断「重扫 → 重渲染 → 再重扫」的自激循环
+  var MIN_RESCAN_INTERVAL = 1200;
 
   function scheduleRescan(delay) {
+    // 拟人化填充进行中：填充本身就在改 DOM（Layui/antd 组件频繁切 class），
+    // 此时重扫会反复重建面板、打断填充队列与用户操作，故直接忽略自动重扫。
+    if (state.filling) return;
+    var since = Date.now() - lastScanAt;
+    if (lastScanAt && since >= 0 && since < MIN_RESCAN_INTERVAL) {
+      delay = Math.max(MIN_RESCAN_INTERVAL - since + 50, delay || 0);
+    }
     clearTimeout(rescanTimer);
-    rescanTimer = setTimeout(scan, delay || 600);
+    rescanTimer = setTimeout(scan, Math.max(delay || 600, 200));
   }
 
   function scan() {
@@ -112,15 +123,31 @@
         state.totalControls = controls.length;
         state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, predictions);
         state.matches.forEach(function (m) { m._resume = state.resume; m.fromOcr = false; });
+        lastScanAt = Date.now();
         render();
         scanning = false;
       }
     });
   }
 
+  // 结果签名：字段/分段/层级/来源都没变时，重扫不必重建面板，
+  // 否则会清空 #fo-list，打断用户正在进行的点击、滚动与逐字段填写。
+  var lastRenderSig = '';
+  function matchSignature(matches, total, ocrN) {
+    var parts = [String(total || 0), String(ocrN || 0)];
+    for (var i = 0; i < matches.length; i++) {
+      var m = matches[i];
+      parts.push(m.key + '@' + (m.segmentIdx || 0) + '#' + (m.tier || '') + (m.fromOcr ? 'o' : ''));
+    }
+    return parts.join('|');
+  }
+
   function render() {
     if (!state.visible) return;
     var shown = state.matches;
+    var sig = matchSignature(shown, state.totalControls, state.ocrIdentified);
+    if (sig === lastRenderSig) return;
+    lastRenderSig = sig;
     FO.highlight.clear();
     // 角标默认关闭（面板手动填写为主）；用户可在设置里重新开启
     if (state.settings.highlight && shown.length) {
@@ -199,24 +226,65 @@
       var cas = FO.filler.findRegionCascade(m.ctrl.el);
       if (cas) return FO.filler.fillRegionCascade(cas, v);
     }
-    return FO.filler.fillControl(m.ctrl, v, { key: m.key });
+    return FO.filler.fillControl(m.ctrl, v, {
+      key: m.key,
+      typed: !!state.settings.humanTyping,  // 逐字符输入（可选开关）
+      settings: state.settings
+    });
   }
 
+  /**
+   * 拟人化串行填充：字段之间随机停顿、写入前模拟鼠标悬停，异步控件（下拉/逐字符）等落值后再进下一个。
+   * 目的：避免整页字段在同一 tick 内写完全部值，形成明显的机器操作特征。
+   * 结果计数与完成提示由队列跑完后统一汇总。
+   */
   function fillAll() {
     if (!state.matches.length) { FO.floatball.toast('本页没有识别到可填字段'); return; }
-    var okN = 0, fuzzyN = 0, confirmN = 0, missN = 0;
-    var fuzzyMsg = [];
-    state.matches.forEach(function (m) {
-      if (m.tier === 'auto') {
-        var r = fillMatch(m);
-        if (r && r.ok) { okN++; if (r.fuzzy) { fuzzyN++; fuzzyMsg.push((FO.fieldDef(m.key) || {}).label || m.key); } }
-        else missN++;
-      } else if (m.tier === 'confirm') confirmN++;
-    });
+    if (state.filling) { FO.floatball.toast('正在填充中，请稍候…'); return; }
+    var H = FO.humanize;
+    var queue = state.matches.filter(function (m) { return m.tier === 'auto'; });
+    var confirmN = state.matches.length - queue.length;
+    if (!queue.length) {
+      FO.floatball.toast(confirmN ? confirmN + ' 项待确认（点橙色角标）' : '没有可自动填充的字段');
+      return;
+    }
+
+    state.filling = true;
     state.filledOnce = true;
-    var msg = '已填充 ' + okN + ' 项' + (confirmN ? '，' + confirmN + ' 项待确认（点橙色角标）' : '') + (missN ? '，' + missN + ' 项缺值' : '');
-    if (fuzzyN) msg += '；' + fuzzyN + ' 项为接近匹配：' + fuzzyMsg.slice(0, 2).join('、');
-    FO.floatball.toast(msg);
+    var token = ++state.fillToken;   // 取消令牌：clearAll / 新一轮填充都会让它失效
+    var acc = { ok: 0, fuzzy: 0, miss: 0, fuzzyMsg: [] };
+    var i = 0;
+
+    function step() {
+      if (token !== state.fillToken || i >= queue.length) return Promise.resolve();
+      var m = queue[i];
+      var label = (FO.fieldDef(m.key) || {}).label || m.key;
+      var gap = H ? H.nextGap(state.settings, i) : 0;
+      i++;
+      return (H ? H.sleep(gap) : Promise.resolve()).then(function () {
+        if (token !== state.fillToken) return;
+        FO.floatball.progress('填充中 ' + i + '/' + queue.length + '：' + label);
+        if (H && m.ctrl && m.ctrl.el) H.hoverInto(m.ctrl.el, state.settings);
+        var r = fillMatch(m);
+        if (r && r.ok) {
+          acc.ok++;
+          if (r.fuzzy) { acc.fuzzy++; acc.fuzzyMsg.push(label); }
+        } else acc.miss++;
+        // 异步控件（下拉/逐字符）等落值；单个字段失败不阻断后续字段
+        return (r && r.promise) ? r.promise.catch(function () { /* 忽略，继续下一个 */ }) : null;
+      }).then(step);
+    }
+
+    step().catch(function () { /* 队列异常兜底，确保状态复位 */ }).then(function () {
+      FO.floatball.progressEnd();
+      if (token !== state.fillToken) return;   // 已被 clearAll 取消，不覆盖其提示
+      state.filling = false;
+      // 填充期间自动重扫被挂起；结束后补一次（结果未变时 render 会自行跳过，不打断用户）
+      scheduleRescan(1500);
+      var msg = '已填充 ' + acc.ok + ' 项' + (confirmN ? '，' + confirmN + ' 项待确认（点橙色角标）' : '') + (acc.miss ? '，' + acc.miss + ' 项缺值' : '');
+      if (acc.fuzzy) msg += '；' + acc.fuzzy + ' 项为接近匹配：' + acc.fuzzyMsg.slice(0, 2).join('、');
+      FO.floatball.toast(msg);
+    });
   }
 
   function onBadgeAction(m, forcedValue, segIdx) {
@@ -305,6 +373,9 @@
   // ---------- 悬浮球事件总线 ----------
   document.addEventListener('fo-fill-all', function () { fillAll(); });
   document.addEventListener('fo-clear-all', function () {
+    state.fillToken++;              // 作废仍在跑的拟人化填充队列
+    state.filling = false;
+    FO.floatball.progressEnd();
     var n = FO.filler.clearAll();
     FO.floatball.toast(n ? '已还原 ' + n + ' 个字段' : '没有可还原的字段');
   });
@@ -442,22 +513,84 @@
   } catch (e) { /* 测试环境 */ }
 
   // ---------- 动态表单监听 ----------
+  // 站点常用 jQuery .show()/.hide() 切换 style/class 显隐（无 DOM 插入）。
+  // 但组件库（Layui/antd 等）在打开下拉、聚焦时会高频切换 class（如 layui-form-selected），
+  // 若只按「容器含表单控件」判定，就会触发重扫风暴。这里只认「显隐相关的属性真的变了」。
+  var VIS_CLASS_RE = /(^|[\s-])(hidden|hide|show|none|collapse|collapsed|expand|expanded|display|visible|invisible|fade|masked)([\s-]|$)/i;
+  // 组件库高频切换、但与显隐无关的类名（Layui 开合下拉/聚焦态等），必须先剔除
+  var VIS_CLASS_NOISE = /^(layui-select-none|layui-form-selected|layui-this|layui-input-focus|layui-input-block|active|selected|open|closed|checked|hover|focus)$/i;
+  var VIS_STYLE_RE = /(?:^|;)\s*(display|visibility|opacity)\s*:\s*([^;]+)/gi;
+
+  /** 从 class 串里挑出与显隐有关的类名（忽略 selected/active 这类高频噪声类） */
+  function visClassPart(cls) {
+    if (!cls) return '';
+    var out = [];
+    cls.split(/\s+/).forEach(function (c) {
+      if (!c || VIS_CLASS_NOISE.test(c)) return;
+      if (VIS_CLASS_RE.test(c)) out.push(c);
+    });
+    return out.sort().join(' ');
+  }
+
+  /** 从内联 style 串里挑出 display/visibility/opacity 的值 */
+  function visStylePart(styleText) {
+    if (!styleText) return '';
+    var out = [], m;
+    VIS_STYLE_RE.lastIndex = 0;
+    while ((m = VIS_STYLE_RE.exec(String(styleText)))) {
+      out.push(m[1].toLowerCase() + ':' + m[2].trim().toLowerCase());
+    }
+    return out.sort().join(';');
+  }
+
+  /** 该属性变化是否代表「真实显隐切换」（而非组件库的装饰性 class） */
+  function visibilityChanged(m) {
+    var t = m.target;
+    if (!t || t.nodeType !== 1) return false;
+    var name = m.attributeName;
+    if (name === 'hidden') return (m.oldValue !== null) !== t.hasAttribute('hidden');
+    var oldV = m.oldValue == null ? '' : String(m.oldValue);
+    var newV = '';
+    try { newV = String(t.getAttribute(name) || ''); } catch (e) { newV = ''; }
+    if (name === 'style') return visStylePart(oldV) !== visStylePart(newV);
+    if (name === 'class') return visClassPart(oldV) !== visClassPart(newV);
+    return false;
+  }
+
   var mo = null;
   function startObserver() {
     if (mo || !document.documentElement) return;
     mo = new MutationObserver(function (muts) {
       // 忽略自家 UI 的 DOM 变化
       var relevant = muts.some(function (m) {
+        if (m.type === 'attributes') {
+          if (!visibilityChanged(m)) return false;   // 纯装饰性 class 变化一律忽略
+          var t = m.target;
+          if (t.id === 'fo-ball-host' || t.id === 'fo-badge-host') return false;
+          if (t.closest && t.closest('#fo-ball-host,#fo-badge-host')) return false;
+          // 只有「显隐切换后暴露/隐藏了表单控件」才值得重扫
+          var sel = 'input,select,textarea,[contenteditable="true"]';
+          return !!(t.matches && t.matches(sel)) ||
+            !!(t.querySelector && t.querySelector(sel));
+        }
         for (var i = 0; i < m.addedNodes.length; i++) {
           var n = m.addedNodes[i];
-          if (n.nodeType === 1 && n.id !== 'fo-ball-host' && n.id !== 'fo-badge-host') return true;
-          if (n.nodeType === 1 && n.querySelector && n.querySelector('input,select,textarea,[contenteditable="true"]')) return true;
+          if (n.nodeType !== 1) continue;
+          if (n.id === 'fo-ball-host' || n.id === 'fo-badge-host') continue;
+          if (n.closest && n.closest('#fo-ball-host,#fo-badge-host')) continue;
+          if (n.tagName === 'INPUT' || n.tagName === 'SELECT' || n.tagName === 'TEXTAREA') return true;
+          if (n.isContentEditable) return true;
+          if (n.querySelector && n.querySelector('input,select,textarea,[contenteditable="true"]')) return true;
         }
         return false;
       });
       if (relevant) scheduleRescan(700);
     });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
+    mo.observe(document.documentElement, {
+      childList: true, subtree: true,
+      attributes: true, attributeOldValue: true,
+      attributeFilter: ['style', 'class', 'hidden']
+    });
   }
 
   // ---------- 启动 ----------

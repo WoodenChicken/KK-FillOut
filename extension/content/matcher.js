@@ -276,6 +276,27 @@
   }
 
   /**
+   * 教育摘要字段隔离：
+   * 这个站点在教育经历数组之前，常出现「最高学历 / 全日制院校 / 在职学历 / 全日制专业」这类一次性摘要字段。
+   * 它们若被误判成 education.*，会抢占 ordinal fallback 的第 0/1 次出现，导致真正两段教育经历都落到同一段。
+   * 处理策略：命中这些前缀时，强烈抑制 education.* 数组字段，让它们不要参与数组分段。
+   */
+  function guardEducationSummary(ctrl, scores) {
+    var label = String(ctrl && ctrl.signals && ctrl.signals.labelText || '');
+    var placeholder = String(ctrl && ctrl.signals && ctrl.signals.placeholder || '');
+    var text = label + ' ' + placeholder;
+    if (!/最高学历|最高学位|最高学历类型|全日制|非全日制|在职/.test(text)) return;
+
+    Object.keys(scores).forEach(function (key) {
+      if (/^education\./.test(key)) scores[key].score *= 0.12;
+    });
+
+    if (/最高学历|全日制学历|在职学历|非全日制学历/.test(text) && scores['basicInfo.educationDegree']) {
+      scores['basicInfo.educationDegree'].score = Math.min(1, scores['basicInfo.educationDegree'].score + 0.12);
+    }
+  }
+
+  /**
    * 跨组语义同名字段簇：section 消歧时用于把裸标签路由到正确组。
    * 例如 '姓名' 可能命中 basicInfo.name 或 family.name，由 section 决定。
    */
@@ -694,6 +715,7 @@
       arbitrate(scores);
       typeHints(ctrl, scores);
       contextBoost(ctrl, scores);
+      guardEducationSummary(ctrl, scores);
       disambiguateBySection(ctrl, scores);
       if (modelPredictions && modelPredictions[i]) mergeModel(ctrl, scores, modelPredictions[i]);
 

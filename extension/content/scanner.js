@@ -24,10 +24,39 @@
     return true;
   }
 
+  function inputClass(el) {
+    return (el && el.className && typeof el.className === 'string') ? el.className : '';
+  }
+
+  function inputPlaceholder(el) {
+    return String((el && el.getAttribute && el.getAttribute('placeholder')) || '').trim();
+  }
+
+  function isTdesignChooser(el) {
+    var cls = inputClass(el);
+    var ph = inputPlaceholder(el);
+    return /(^|\s)t-input__inner(\s|$)/.test(cls) && /^请选择/.test(ph);
+  }
+
+  /**
+   * Layui 自定义控件：原生的 select 被隐藏，可见入口是只读的模拟输入框。
+   *   - 下拉：class 含 layui-unselect（layui.form 渲染的 select）
+   *   - 日期：laydate 年月选择器，只读 + 「请选择…」占位
+   * 这些 readonly 输入若不做例外会被 isFillable 过滤掉（整段表单识别不到）。
+   */
+  function isLayuiChooser(el) {
+    var cls = inputClass(el);
+    if (!/(^|\s)layui-/.test(cls)) return false;
+    if (/(^|\s)layui-unselect(\s|$)/.test(cls)) return true;
+    return !!(el.readOnly && /^请选择/.test(inputPlaceholder(el)));
+  }
+  FO.scanner.isLayuiChooser = isLayuiChooser;
+
   function isFillable(el) {
     // [role=combobox]：antd Select 等组件库的内部搜索框（type=search + readonly），
     // 是「组合控件」的填写入口，不能因 readonly 被过滤；真 disabled 仍然排除。
-    var isWidget = el.getAttribute && el.getAttribute('role') === 'combobox';
+    var isWidget = (el.getAttribute && el.getAttribute('role') === 'combobox') ||
+      isTdesignChooser(el) || isLayuiChooser(el);
     if (el.disabled) return false;
     if (!isWidget && el.readOnly) return false;
     var type = (el.getAttribute('type') || '').toLowerCase();
@@ -334,11 +363,18 @@
     if (el.tagName === 'TEXTAREA') return 'textarea';
     if (el.getAttribute('contenteditable') !== null) return 'contenteditable';
     // 自定义选择框：Phoenix/antd/Element 等组件库的 Select 底层是 input
-    var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+    var cls = inputClass(el);
+    var ph = inputPlaceholder(el);
     if (el.getAttribute('role') === 'combobox' ||
         /phoenix-select__input|ant-select-selection-search-input|el-input__inner.*select|van-field__control|nut-input__input/.test(cls) ||
         el.hasAttribute('data-select')) {
       return 'combobox';
+    }
+    if (isTdesignChooser(el)) {
+      return /日期|时间/.test(ph) ? 'date' : 'combobox';
+    }
+    if (isLayuiChooser(el)) {
+      return /(^|\s)layui-unselect(\s|$)/.test(cls) ? 'combobox' : 'date';
     }
     var t = (el.getAttribute('type') || 'text').toLowerCase();
     if (t === 'radio') return 'radio';

@@ -159,7 +159,10 @@
     autoFillThreshold: 0.85,
     confirmThreshold: 0.5,
     mlEnabled: true,
-    ballVisible: true
+    ballVisible: true,
+    // 拟人化填充节奏：字段之间随机停顿，避免整页字段在同一 tick 内写完全部值
+    fillSpeed: 'normal',   // fast | normal | slow
+    humanTyping: false     // 逐字符模拟键盘输入（更自然，但明显更慢）
   };
 
   var GROUP_KEYWORDS = {

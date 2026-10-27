@@ -31,6 +31,7 @@
         "content/scanner.js",
         "content/ocr-assign.js",
         "content/filler.js",
+        "content/humanize.js",
         "content/highlight.js",
         "content/floatball.js",
         "content/adapters.js",
