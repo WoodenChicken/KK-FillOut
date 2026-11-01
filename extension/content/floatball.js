@@ -41,6 +41,9 @@
     '.ops button:hover{filter:brightness(1.05);}',
     '.ops button:active{transform:translateY(1px);}',
     '.ops .btn-fill{grid-column:1/-1;padding:11px 0;font-size:14px;box-shadow:0 4px 12px rgba(22,163,74,.35);}',
+    '.ops .opt-skip{grid-column:1/-1;display:flex;align-items:center;gap:7px;padding:1px 4px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;user-select:none;}',
+    '.ops .opt-skip input{width:14px;height:14px;margin:0;accent-color:#16a34a;cursor:pointer;}',
+    '.ops .opt-skip span{color:#94a3b8;font-weight:500;}',
     '.btn-fill{background:#16a34a;color:#fff;} .btn-fill:hover{background:#15803d;}',
     '.btn-clear{background:#e2e8f0;color:#475569;} .btn-clear:hover{background:#cbd5e1;}',
     '.btn-edit{background:#2563eb;color:#fff;} .btn-edit:hover{background:#1d4ed8;}',
@@ -120,6 +123,8 @@
       '<button id="fo-close" title="收起 (Esc)">✕</button></div>' +
       '<div class="ops">' +
       '<button class="btn-fill" id="fo-fill">⚡ 一键填充</button>' +
+      '<label class="opt-skip" title="开启后：遇到已经有值的输入框直接跳过，不覆盖你手工填过或改过的内容">' +
+      '<input type="checkbox" id="fo-skip"><span>跳过已有内容</span></label>' +
       '<button class="btn-clear" id="fo-clear">↩ 清空</button>' +
       '<button class="btn-edit" id="fo-edit">✎ 编辑简历</button>' +
       '<button class="btn-ocr" id="fo-ocr" title="DOM 识别不到时：截图 + 本地 OCR，按位置把标签关联到控件">👁 视觉识别</button>' +
@@ -134,6 +139,9 @@
     });
     panel.querySelector('#fo-close').addEventListener('click', function () { toggle(false); });
     panel.querySelector('#fo-fill').addEventListener('click', function () { emit('fo-fill-all'); });
+    panel.querySelector('#fo-skip').addEventListener('change', function (e) {
+      emit('fo-toggle-skipfilled', { value: !!e.target.checked });
+    });
     panel.querySelector('#fo-clear').addEventListener('click', function () { emit('fo-clear-all'); });
     panel.querySelector('#fo-edit').addEventListener('click', function () { emit('fo-open-editor'); });
     panel.querySelector('#fo-ocr').addEventListener('click', function () { emit('fo-ocr-scan'); });
@@ -238,6 +246,7 @@
       ? ('本页 ' + total + ' 个字段，命中 ' + matches.length + ' 个（' + pct + '%）· 自动 ' + auto + ' · 待确认 ' + confirm_)
       : ('本页识别 ' + matches.length + ' 项（自动 ' + auto + ' · 待确认 ' + confirm_ + '）');
     panel.querySelector('#fo-sub').textContent = sub;
+    panel.querySelector('#fo-skip').checked = !!state.skipFilled;
 
     var list = panel.querySelector('#fo-list');
     list.textContent = '';

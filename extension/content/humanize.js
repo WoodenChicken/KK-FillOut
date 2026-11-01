@@ -55,11 +55,18 @@
     } catch (e) { /* 老浏览器忽略 */ }
   }
 
-  /** 滚入视野并模拟一次鼠标悬停（坐标带抖动，避免每次都落在控件正中） */
+  /** 滚入视野并模拟一次鼠标悬停（坐标带抖动，避免每次都落在控件正中）。
+   *  元素已完整可见时不滚动：smooth 滚动动画会让逐字段填充明显变慢。 */
   function hoverInto(el, settings) {
     if (!el || typeof el.getBoundingClientRect !== 'function') return;
     var fast = ((settings && settings.fillSpeed) || 'normal') === 'fast';
-    try { el.scrollIntoView({ block: 'center', behavior: fast ? 'auto' : 'smooth' }); } catch (e) { /* noop */ }
+    var r0;
+    try { r0 = el.getBoundingClientRect(); } catch (e) { return; }
+    if (!r0) return;
+    var vh = root.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 800;
+    if (r0.top < 80 || r0.bottom > vh - 80) {
+      try { el.scrollIntoView({ block: 'center', behavior: fast ? 'auto' : 'smooth' }); } catch (e) { /* noop */ }
+    }
     var r;
     try { r = el.getBoundingClientRect(); } catch (e) { return; }
     if (!r || (!r.width && !r.height)) return;

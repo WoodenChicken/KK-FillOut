@@ -419,53 +419,166 @@
   }
 
   /**
-   * 家庭成员关系联动：同一行（rowKey 相同）内若存在「关系」字段且其标签/选项/已填值
-   * 包含父亲/母亲/配偶/子女等亲属称谓，则同行的「姓名」「电话」「工作单位」「职务」
-   * 字段强制路由到 family.*，避免被 basicInfo 同名裸标签抢走。
-   * 这是比 section 消歧更强的信号——亲属称谓本身就是 family 区的确凿证据。
+   * 家庭成员语义裁决。
+   *
+   * 问题：'姓名' / '电话' / '工作单位' / '职务' 这些裸标签在 basicInfo / family / work 三组同形，
+   * 仅凭标签无法裁决，而国内网申的「家庭成员」区常常是一个**没有标题**的表格
+   * （首行表头：姓名 | 关系 | 工作单位 | 职务 | 电话，或每行首列写着「父亲」「母亲」），
+   * 结果家庭成员的姓名被填成本人姓名、父母单位被填成本人单位。
+   *
+   * 裁决依据（结构性证据，比区块标题更可靠）：
+   *  ① 控件自身标签/占位/选项含亲属称谓（如「父亲姓名」「关系」下拉的选项里有「母亲」）；
+   *  ② 所在表格表头同时出现「关系(称谓)」与「单位/职务/工作」；
+   *  ③ 所在行/卡片内出现亲属称谓（含已填的关系值）。
+   * 命中即把同行/同表的跨组裸标签字段强制路由到 family.*。
    */
-  var FAMILY_RELATION_HINT = /父亲|母亲|爸爸|妈妈|父|母|配偶|妻子|丈夫|老公|老婆|子女|儿子|女儿|兄|弟|姐|妹|爷爷|奶奶|外公|外婆|岳父|岳母|公公|婆婆/;
 
-  function pairFamilyRelation(controls, results) {
-    var rows = {};
-    results.forEach(function (m, i) {
-      if (!m) return;
-      var rk = controls[i].rowKey || '';
-      if (!rk) return;
-      (rows[rk] = rows[rk] || []).push(i);
-    });
-    Object.keys(rows).forEach(function (rk) {
-      var idxs = rows[rk];
-      if (idxs.length < 2) return;
-      // 检查该行是否有 family 关系信号（关系字段的标签/选项/值含亲属称谓）
-      var hasFamilyRelation = false;
-      for (var i = 0; i < idxs.length; i++) {
-        var ctrl = controls[idxs[i]];
-        var sig = (ctrl.signals.labelText || '') + ' ' + (ctrl.signals.optionsText || '') + ' ' + (ctrl.signals.placeholder || '');
-        if (FAMILY_RELATION_HINT.test(sig)) { hasFamilyRelation = true; break; }
+  // 亲属称谓（严格版：不用单字 父/母，避免"母公司"这类误命中）
+  var KIN_TITLE_RE = /父亲|母亲|爸爸|妈妈|父母|配偶|妻子|丈夫|老公|老婆|儿子|女儿|子女|爷爷|奶奶|外公|外婆|岳父|岳母|公公|婆婆|兄长|哥哥|弟弟|姐姐|妹妹|兄弟|姐妹/;
+
+  // 家庭成员区块标题（不含裸「家庭」—— 「家庭住址/家庭电话」属于本人字段，不能当亲属）
+  var FAMILY_SECTION_RE = /家庭成员|家庭关系|亲属|与本人关系|社会关系|直系亲属/;
+
+  // 紧急联系人：不是家庭成员，也不是本人
+  var EMERGENCY_RE = /紧急|应急/;
+
+  // 明确的"他人"字段：简历里没有对应数据时，宁可留空也不要填成本人
+  var OTHER_PERSON_RE = /推荐人|证明人|担保人|介绍人|监护人|紧急联系人|应急联系人/;
+
+  function signalsText(ctrl) {
+    var s = (ctrl && ctrl.signals) || {};
+    return [s.labelText, s.placeholder, s.ariaLabel, s.dataAttrs].join(' ');
+  }
+
+  var ROW_BOX_SELECTOR = 'tr,li,[class*="row"],[class*="item"],[class*="card"],[class*="member"]';
+
+  /** 行/卡片文本：含静态标签、已填值（关系列已选「父亲」时）以及下拉选项文本（关系下拉的选项含亲属称谓） */
+  function rowTextOf(box) {
+    if (!box) return '';
+    var t = (box.textContent || '').replace(/\s+/g, ' ');
+    var els = box.querySelectorAll ? box.querySelectorAll('input,select,textarea') : [];
+    for (var i = 0; i < Math.min(els.length, 12); i++) {
+      var v = els[i].value;
+      if (v && String(v).length <= 8) t += ' ' + v;
+    }
+    var sels = box.querySelectorAll ? box.querySelectorAll('select') : [];
+    for (var j = 0; j < Math.min(sels.length, 4); j++) {
+      var opts = sels[j].options || [];
+      for (var k = 0; k < Math.min(opts.length, 12); k++) {
+        t += ' ' + ((opts[k] && opts[k].text) || '');
       }
-      if (!hasFamilyRelation) return;
-      // 同行内的 basicInfo 裸标签字段，若 family 有同名字段则强制路由
-      var SIBLING_MAP = {
-        'basicInfo.name': 'family.name',
-        'basicInfo.phone': 'family.phone'
-      };
-      // workUnit / jobTitle 在 family 里叫 workUnit/jobTitle，basicInfo 没有，所以它们不会误命中 basicInfo
-      for (var j = 0; j < idxs.length; j++) {
-        var m = results[idxs[j]];
-        if (!m) continue;
-        var target = SIBLING_MAP[m.key];
-        if (target) {
-          // 仅当该控件标签是裸标签（姓名/电话）而非组特有词时才路由
-          var pat = m.ctrl.signals.labelText || '';
-          if (/^(姓名|名字|电话|手机|手机号|联系电话)$/.test(pat.trim())) {
-            m.key = target;
-            m.score = Math.min(1, m.score + 0.12);
-            m.source = 'family-relation';
-          }
-        }
-      }
+    }
+    return t.slice(0, 200);
+  }
+
+  /** 家庭成员表格：首行表头同时含「关系/称谓」与「单位/职务/工作」，且不是紧急联系人表 */
+  function familyTableEl(el) {
+    var tbl = el && el.closest ? el.closest('table') : null;
+    if (!tbl || !tbl.rows || !tbl.rows.length) return null;
+    var head = (tbl.rows[0].textContent || '').replace(/\s+/g, '');
+    if (EMERGENCY_RE.test(head)) return null;
+    return (/(关系|称谓)/.test(head) && /(单位|职务|工作|职业)/.test(head)) ? tbl : null;
+  }
+
+  /** 控件所在容器内的第一个短标题（用于识别「家庭成员」区块；过长文本说明容器太大，不作判据） */
+  function nearestHeading(box) {
+    if (!box || !box.querySelector) return '';
+    var heads = box.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,caption,.title,[class*="title"],[class*="header"],[class*="heading"]');
+    for (var i = 0; i < Math.min(heads.length, 4); i++) {
+      var h = heads[i];
+      // 单个字段自己的小标题（.form-item__title 之类）不是区块标题，跳过
+      if (h.closest && h.closest('label,[class*="form-item"],[class*="field"]')) continue;
+      var t = (h.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t && t.length <= 24) return t;
+    }
+    return '';
+  }
+
+  /** 就近的「家庭成员」区块容器：只认最近两层的区块级容器且其标题命中家庭成员语义 */
+  function familySectionBox(el) {
+    var sel = 'fieldset,section,article,table,dl,[class*="group"],[class*="module"],[class*="section"],[class*="block"]';
+    var box = el && el.closest ? el.closest(sel) : null;
+    for (var hop = 0; box && hop < 2; hop++) {
+      var head = nearestHeading(box);
+      if (head) return FAMILY_SECTION_RE.test(head) ? box : null; // 最近的标题就是裁决依据
+      box = box.parentElement && box.parentElement.closest ? box.parentElement.closest(sel) : null;
+    }
+    return null;
+  }
+
+  /** 行/卡片控件数量：过多说明命中的是「整块表单」而不是一行，此时不用行文本启发式 */
+  function rowControlCount(box) {
+    if (!box || !box.querySelectorAll) return 99;
+    return box.querySelectorAll('input,select,textarea,[role="combobox"]').length;
+  }
+
+  /** 该控件是否落在「家庭成员」语义区内（自身标签 / 所在表 / 所在区块标题 / 所在行） */
+  function inFamilyContext(ctrl) {
+    if (!ctrl || !ctrl.el) return false;
+    var own = signalsText(ctrl) + ' ' + (ctrl.signals.optionsText || '');
+    if (EMERGENCY_RE.test(own)) return false;
+    if (KIN_TITLE_RE.test(own) || FAMILY_SECTION_RE.test(own)) return true;
+    if (familyTableEl(ctrl.el)) return true;
+    if (familySectionBox(ctrl.el)) return true;
+    var box = ctrl.el.closest ? ctrl.el.closest(ROW_BOX_SELECTOR) : null;
+    if (!box || box.tagName === 'TABLE') return false;
+    if (rowControlCount(box) > 8) return false; // 容器太大，不是一行/一张卡片
+    var txt = rowTextOf(box);
+    if (EMERGENCY_RE.test(txt)) return false; // 紧急联系人行不是家庭成员行
+    if (KIN_TITLE_RE.test(txt)) return true;
+    // 行内同时出现「关系/称谓」与「单位/职务」标签 —— 家庭成员行的典型结构
+    // （关系列可能是无原生 options 的自绘下拉，拿不到选项文本）
+    return /(关系|称谓)/.test(txt) && /(单位|职务|工作|职业)/.test(txt);
+  }
+
+  /** 家庭成员区内加分：family.* 抬升，其余组（尤其 basicInfo 同名裸标签）压制 */
+  function familyBoost(scores) {
+    Object.keys(scores).forEach(function (key) {
+      if (FO.groupOf(key) === 'family') scores[key].score = Math.min(1, scores[key].score + 0.22);
+      else scores[key].score *= 0.7;
     });
+  }
+
+  /** 他人字段保护：命中「推荐人/担保人/紧急联系人…」时压制本人字段，宁可留空也不要错填本人信息 */
+  function guardOtherPerson(ctrl, scores) {
+    var sig = signalsText(ctrl);
+    if (!OTHER_PERSON_RE.test(sig) && !EMERGENCY_RE.test(sig)) return;
+    Object.keys(scores).forEach(function (key) {
+      var g = FO.groupOf(key);
+      // 本人信息（姓名/电话/单位/职务）都不该落到「他人」字段上
+      if (g === 'basicInfo' || g === 'work' || g === 'internship') scores[key].score *= 0.25;
+    });
+  }
+
+  /** 家庭成员区内的跨组裸标签 → family 字段映射 */
+  var FAMILY_ROUTE = {
+    'basicInfo.name': 'family.name',
+    'basicInfo.phone': 'family.phone',
+    'work.company': 'family.workUnit',
+    'internship.company': 'family.workUnit',
+    'work.position': 'family.jobTitle',
+    'internship.position': 'family.jobTitle'
+  };
+
+  /** 结构证据（行/表）足够强：直接改写命中结果，避免家庭成员的姓名/单位落到本人字段 */
+  function routeFamilyContexts(results) {
+    for (var i = 0; i < results.length; i++) {
+      var m = results[i];
+      if (!m || !m.ctrl) continue;
+      if (!inFamilyContext(m.ctrl)) continue;
+      var sig = signalsText(m.ctrl);
+      if (OTHER_PERSON_RE.test(sig) || EMERGENCY_RE.test(sig)) continue; // 紧急联系人/担保人另属他处
+      var target = FAMILY_ROUTE[m.key];
+      if (!target) continue;
+      m.key = target;
+      m.score = Math.max(m.score, 0.9);
+      m.source = 'family-context';
+      if (m.candidates && m.candidates.length) {
+        m.candidates = [{ key: target, score: m.score }]
+          .concat(m.candidates.filter(function (c) { return c.key !== target; }))
+          .slice(0, 3);
+      }
+    }
   }
 
   /* ---------------- 日期区间（年/月 下拉）成组识别 ----------------
@@ -716,6 +829,9 @@
       typeHints(ctrl, scores);
       contextBoost(ctrl, scores);
       guardEducationSummary(ctrl, scores);
+      // 家庭成员区（行/表结构证据）优先裁决：避免「姓名/单位」被本人字段抢走
+      if (inFamilyContext(ctrl)) familyBoost(scores);
+      guardOtherPerson(ctrl, scores);
       disambiguateBySection(ctrl, scores);
       if (modelPredictions && modelPredictions[i]) mergeModel(ctrl, scores, modelPredictions[i]);
 
@@ -725,9 +841,21 @@
       }
 
       var ranked = Object.keys(scores)
-        .map(function (k) { return { key: k, score: scores[k].score }; })
+        .map(function (k) { return { key: k, score: scores[k].score, len: scores[k].matchedLen || 0 }; })
         .filter(function (r) { return r.score > 0.18; })
-        .sort(function (a, b) { return b.score - a.score; });
+        .sort(function (a, b) {
+          // 1) 分数优先
+          if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+          // 2) 同分时 family 组排后：家庭成员的归属必须有结构证据
+          //    （见 familyBoost / routeFamilyContexts）。否则「单位」「工作单位」「职务」这类
+          //    跨组裸标签在无 section 上下文时会因词典插入顺序被 family.* 抢先命中，
+          //    把实习/工作经历的单位填成亲属的单位。
+          var fa = FO.groupOf(a.key) === 'family' ? 1 : 0;
+          var fb = FO.groupOf(b.key) === 'family' ? 1 : 0;
+          if (fa !== fb) return fa - fb;
+          // 3) 同分同组：命中更长的 pattern 更具体
+          return b.len - a.len;
+        });
 
       if (!ranked.length) {
         results.push(null);
@@ -748,7 +876,7 @@
 
     bindDateGroups(controls, results, settings);
     pairDates(controls, results);
-    pairFamilyRelation(controls, results);
+    routeFamilyContexts(results);
     assignSegments(results, resume);
 
     return results.filter(Boolean);

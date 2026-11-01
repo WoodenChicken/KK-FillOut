@@ -17,6 +17,9 @@
     filledOnce: false,
     lastToggleAt: 0,
     mlRequested: false,
+    // 本地修正记忆：host::控件特征 → 用户手工选定的字段 key。
+    // 重扫/一键填充时优先套用，避免「纠正过又被填错」。
+    corrections: {},
     lastFocused: null, // 用户最后聚焦的页面控件（手动填写目标）
     totalControls: 0,  // 本页表单控件总数（用于命中率计算）
     ocrIdentified: 0,  // 视觉识别关联到标签的控件数
@@ -27,9 +30,10 @@
   // ---------- 存储装载 ----------
   function loadStorage(cb) {
     try {
-      chrome.storage.local.get(['resume', 'settings'], function (r) {
+      chrome.storage.local.get(['resume', 'settings', 'corrections'], function (r) {
         state.resume = FO.normalizeResume(r && r.resume);
         state.settings = Object.assign({}, FO.DEFAULT_SETTINGS, (r && r.settings) || {});
+        state.corrections = (r && r.corrections) || {};
         cb();
       });
     } catch (e) {
@@ -37,12 +41,142 @@
       var t = window.__FO_TEST_DATA__ || {};
       state.resume = FO.normalizeResume(t.resume);
       state.settings = Object.assign({}, FO.DEFAULT_SETTINGS, t.settings || {});
+      state.corrections = t.corrections || {};
       cb();
     }
   }
 
   function saveSettings() {
     try { chrome.storage.local.set({ settings: state.settings }); } catch (e) { /* noop */ }
+  }
+
+  // 只改 settings 里的个别字段：先合并最新存储再写，
+  // 避免用页面加载时的旧快照覆盖掉 Side Panel 刚改过的其它设置。
+  function patchSettings(patch) {
+    try {
+      chrome.storage.local.get('settings', function (r) {
+        var st = Object.assign({}, FO.DEFAULT_SETTINGS, (r && r.settings) || {}, patch);
+        state.settings = st;
+        chrome.storage.local.set({ settings: st });
+      });
+    } catch (e) {
+      Object.assign(state.settings, patch);
+    }
+  }
+
+  // ---------- 本地修正记忆 ----------
+  // 用于记住「这个网页上的这个控件 = 用户选的哪个字段」，重扫后覆盖规则/ML 的判断。
+  // 自定义字段（custom.*）不在 schema 中，同样允许记忆。
+  function isKnownKey(key) {
+    return !!FO.fieldDef(key) || /^custom\./.test(key || '');
+  }
+
+  function ctrlSignature(ctrl) {
+    if (!ctrl || !ctrl.signals) return '';
+    var s = ctrl.signals;
+    var parts = [
+      FO.matcher.norm(s.name || ''),
+      FO.matcher.norm(s.id || ''),
+      FO.matcher.norm(s.labelText || ''),
+      FO.matcher.norm(s.placeholder || '')
+    ];
+    var sig = parts.join('|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
+    return sig ? sig.slice(0, 160) : '';
+  }
+
+  function correctionKey(ctrl) {
+    var sig = ctrlSignature(ctrl);
+    return sig ? (location.host + '::' + sig) : '';
+  }
+
+  function saveCorrections() {
+    try { chrome.storage.local.set({ corrections: state.corrections }); } catch (e) { /* noop */ }
+  }
+
+  function recordCorrection(ctrl, key) {
+    if (!ctrl || !ctrl.el || !key || !isKnownKey(key)) return;
+    var mk = correctionKey(ctrl);
+    if (!mk) return;
+    state.corrections[mk] = { key: key, ts: Date.now() };
+    var keys = Object.keys(state.corrections);
+    if (keys.length > 2000) {
+      keys.sort(function (a, b) { return (state.corrections[a].ts || 0) - (state.corrections[b].ts || 0); });
+      keys.slice(0, keys.length - 1500).forEach(function (k) { delete state.corrections[k]; });
+    }
+    saveCorrections();
+  }
+
+  // 用修正记忆覆盖匹配结果；并给「被修正过但规则没匹配上」的控件补一条匹配，
+  // 让「一键填充」也能覆盖到它们。
+  function applyCorrections(matches, controls) {
+    var mem = state.corrections;
+    if (!mem || !Object.keys(mem).length) return;
+    var host = location.host;
+    matches.forEach(function (m) {
+      if (!m || !m.ctrl || !m.ctrl.el) return;
+      var rec = mem[host + '::' + ctrlSignature(m.ctrl)];
+      if (rec && rec.key && rec.key !== m.key && isKnownKey(rec.key)) {
+        m.key = rec.key;
+        m.score = 1;
+        m.tier = 'auto';
+        m.source = 'memory';
+      }
+    });
+    var seen = {};
+    matches.forEach(function (m) { if (m && m.ctrl && m.ctrl.el) seen[m.ctrl.el] = true; });
+    (controls || []).forEach(function (ctrl, i) {
+      if (!ctrl || !ctrl.el || seen[ctrl.el]) return;
+      var rec = mem[host + '::' + ctrlSignature(ctrl)];
+      if (!rec || !rec.key || !isKnownKey(rec.key)) return;
+      matches.push({
+        id: 'mem' + i,
+        ctrl: ctrl,
+        key: rec.key,
+        score: 1,
+        source: 'memory',
+        candidates: [{ key: rec.key, score: 1 }],
+        tier: 'auto',
+        segmentIdx: 0
+      });
+    });
+  }
+
+  // 控件是否已经有值（用于「跳过已有内容」）。占位选项（请选择 / --）不算有值。
+  function ctrlHasValue(ctrl) {
+    if (!ctrl || !ctrl.el) return false;
+    var el = ctrl.el;
+    try {
+      if (ctrl.kind === 'radio' || ctrl.kind === 'checkbox') {
+        var grp = ctrl.radioGroup || [el];
+        return Array.prototype.some.call(grp, function (r) { return !!(r && r.checked); });
+      }
+      if (ctrl.kind === 'contenteditable' || (el.getAttribute && el.getAttribute('contenteditable') !== null)) {
+        return !!String(el.textContent || '').trim();
+      }
+      if (el.tagName === 'SELECT') {
+        var opt = el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+        var txt = opt ? String(opt.text || '').trim() : '';
+        var val = String(el.value || '').trim();
+        if (!txt && !val) return false;
+        if (/^(请选择|请选择…|请选择\.\.\.|--+|—+|-+|选择|全部|不限)$/.test(txt)) return false;
+        return true;
+      }
+      if (ctrl.kind === 'combobox') {
+        if (String(el.value || '').trim()) return true;
+        var box = el.closest ? el.closest('[class*="select"],[class*="picker"],[class*="dropdown"]') : null;
+        var bt = box ? String(box.textContent || '').trim() : '';
+        return !!bt && !/请选择|请输入/.test(bt);
+      }
+      return !!String(el.value || '').trim();
+    } catch (e) { return false; }
+  }
+
+  function matchHasValue(m) {
+    if (!m || !m.ctrl) return false;
+    if (m.dateGroup && m.dateGroup.parts) {
+      return m.dateGroup.parts.some(function (p) { return ctrlHasValue({ el: p.el, kind: 'text' }); });
+    }
+    return ctrlHasValue(m.ctrl);
   }
 
   // ---------- ML 模型懒加载（可选；models/model.json 不存在则纯规则） ----------
@@ -122,6 +256,8 @@
       function finish() {
         state.totalControls = controls.length;
         state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, predictions);
+        // 本地修正记忆最后覆盖：用户手工纠正过的控件以修正结果为准
+        applyCorrections(state.matches, controls);
         state.matches.forEach(function (m) { m._resume = state.resume; m.fromOcr = false; });
         lastScanAt = Date.now();
         render();
@@ -163,7 +299,8 @@
       resume: state.resume,
       resumeEmpty: FO.isResumeEmpty(state.resume),
       totalControls: state.totalControls || 0,
-      ocrIdentified: state.ocrIdentified || 0
+      ocrIdentified: state.ocrIdentified || 0,
+      skipFilled: !!state.settings.skipFilled
     });
   }
 
@@ -252,15 +389,21 @@
     state.filling = true;
     state.filledOnce = true;
     var token = ++state.fillToken;   // 取消令牌：clearAll / 新一轮填充都会让它失效
-    var acc = { ok: 0, fuzzy: 0, miss: 0, fuzzyMsg: [] };
+    var skipFilled = !!state.settings.skipFilled;
+    var acc = { ok: 0, fuzzy: 0, miss: 0, skip: 0, fuzzyMsg: [] };
     var i = 0;
 
     function step() {
       if (token !== state.fillToken || i >= queue.length) return Promise.resolve();
       var m = queue[i];
+      i++;
+      // 跳过已有内容：不覆盖用户手工填过 / 改过的值（占位选项不算有值）
+      if (skipFilled && matchHasValue(m)) {
+        acc.skip++;
+        return Promise.resolve().then(step);
+      }
       var label = (FO.fieldDef(m.key) || {}).label || m.key;
       var gap = H ? H.nextGap(state.settings, i) : 0;
-      i++;
       return (H ? H.sleep(gap) : Promise.resolve()).then(function () {
         if (token !== state.fillToken) return;
         FO.floatball.progress('填充中 ' + i + '/' + queue.length + '：' + label);
@@ -281,7 +424,7 @@
       state.filling = false;
       // 填充期间自动重扫被挂起；结束后补一次（结果未变时 render 会自行跳过，不打断用户）
       scheduleRescan(1500);
-      var msg = '已填充 ' + acc.ok + ' 项' + (confirmN ? '，' + confirmN + ' 项待确认（点橙色角标）' : '') + (acc.miss ? '，' + acc.miss + ' 项缺值' : '');
+      var msg = '已填充 ' + acc.ok + ' 项' + (acc.skip ? '，跳过已有内容 ' + acc.skip + ' 项' : '') + (confirmN ? '，' + confirmN + ' 项待确认（点橙色角标）' : '') + (acc.miss ? '，' + acc.miss + ' 项缺值' : '');
       if (acc.fuzzy) msg += '；' + acc.fuzzy + ' 项为接近匹配：' + acc.fuzzyMsg.slice(0, 2).join('、');
       FO.floatball.toast(msg);
     });
@@ -342,6 +485,7 @@
     controls.forEach(function (c) { if (c.signals.ocrText) ocrEls[c.el] = true; });
     state.ocrIdentified = n;
     state.matches = FO.matcher.matchAll(controls, state.resume, state.settings, null);
+    applyCorrections(state.matches, controls);
     state.matches.forEach(function (m) {
       m._resume = state.resume;
       m.fromOcr = !!ocrEls[m.ctrl.el];
@@ -372,6 +516,13 @@
 
   // ---------- 悬浮球事件总线 ----------
   document.addEventListener('fo-fill-all', function () { fillAll(); });
+  document.addEventListener('fo-toggle-skipfilled', function (e) {
+    var on = !!(e.detail && e.detail.value);
+    patchSettings({ skipFilled: on });
+    FO.floatball.toast(on
+      ? '一键填充：已开启「跳过已有内容」（不覆盖已填字段）'
+      : '一键填充：已关闭「跳过已有内容」（将按匹配覆盖，含本地修正记忆）');
+  });
   document.addEventListener('fo-clear-all', function () {
     state.fillToken++;              // 作废仍在跑的拟人化填充队列
     state.filling = false;
@@ -452,9 +603,13 @@
     }
     var r = FO.filler.fillControl(target, v, { key: key });
     if (r && r.ok) {
-      // 目标恰好是本页识别过的控件 → 记一条训练样本
-      var m = state.matches.find(function (x) { return x.ctrl && x.ctrl.el === target.el; });
-      if (m) logSample(m);
+      // 手动填写时「用户选中的字段」才是真值：以用户选的 key 记样本，
+      // 而不是引擎对该控件的猜测（m.key）——否则会把错误映射学成正确答案。
+      logSample({ ctrl: target, key: key, score: 1 });
+      // 本地修正记忆：记住「这个控件 = 用户选的字段」，重扫/一键填充优先套用
+      recordCorrection(target, key);
+      var hit = state.matches.find(function (x) { return x.ctrl && x.ctrl.el === target.el; });
+      if (hit && hit.key !== key) { hit.key = key; hit.score = 1; hit.tier = 'auto'; hit.source = 'memory'; }
       // combobox 等异步填充由 filler 完成后自行 toast
       if (!r.async) FO.floatball.toast('已填入：' + label + (segIdx ? '（第' + (segIdx + 1) + '条）' : '') + (r.fuzzy ? '（接近匹配，请核对）' : ''));
     } else {

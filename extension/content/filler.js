@@ -141,6 +141,9 @@
   FO.filler.fillControl = function (ctrl, value, opts) {
     opts = opts || {};
     var el = ctrl.el;
+    // 匹配到的 key 必须落到控件上：fillCombobox 依赖它判断「地区级联」与值别名，
+    // 不记录会导致地区下拉/学历等别名下拉全部匹配失败，白跑两轮重试（每项约 5s）。
+    ctrl._matchKey = opts.key || ctrl._matchKey;
     var result = { ok: false, fuzzy: false, message: '' };
     try {
       switch (ctrl.kind) {
@@ -269,8 +272,14 @@
     });
   }
 
-  /** 轮询等待：fn 返回真值即成功 resolve(真值)；超时 resolve(null) */
-  function waitFor(fn, timeout) {
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, Math.max(0, ms || 0)); });
+  }
+
+  /** 轮询等待：fn 返回真值即成功 resolve(真值)；超时 resolve(null)。
+   *  interval 默认 160ms；下拉/组合控件传 60ms —— 选项一到就立刻点，不空转等待。 */
+  function waitFor(fn, timeout, interval) {
+    var step = interval || 160;
     return new Promise(function (resolve) {
       var t0 = Date.now();
       (function poll() {
@@ -278,21 +287,24 @@
         try { v = fn(); } catch (e) { /* 下一步 */ }
         if (v) return resolve(v);
         if (Date.now() - t0 > (timeout || 4000)) return resolve(null);
-        setTimeout(poll, 160);
+        setTimeout(poll, step);
       })();
     });
   }
 
   function comboboxPopupRoot(el) {
+    // 命中过的面板缓存到控件上：轮询期间不必每 60ms 重扫整个文档
+    var cached = el.__foPopRoot;
+    if (cached && cached.isConnected && cached.getClientRects().length) return cached;
     // Layui：下拉 dl 与只读输入框同在一个 .layui-form-select 容器内
     var layuiBox = el.closest ? el.closest('.layui-form-select') : null;
     if (layuiBox) {
       var dl = layuiBox.querySelector('dl');
-      if (dl && dl.getClientRects().length) return dl;
+      if (dl && dl.getClientRects().length) { el.__foPopRoot = dl; return dl; }
     }
     var listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
     var root = listId ? document.getElementById(listId) : null;
-    if (root && root.getClientRects().length) return root;
+    if (root && root.getClientRects().length) { el.__foPopRoot = root; return root; }
     var dds = document.querySelectorAll(
       '.ant-select-dropdown:not(.ant-select-dropdown-hidden),' +
       '[class*="select-dropdown"]:not([class*="dropdown-hidden"]),' +
@@ -301,10 +313,18 @@
       '[class*="phoenix-popup"]:not([class*="hidden"]),' +
       '.el-select-dropdown:not(.is-hidden),' +
       '[class*="van-popup"]:not([class*="hidden"]),' +
-      '.t-select__dropdown,.t-select-input__dropdown,.t-cascader__dropdown,.t-popup'
+      '.t-select__dropdown,.t-select-input__dropdown,.t-cascader__dropdown,.t-popup,' +
+      '[role="listbox"],[class*="option-list"],[class*="optionList"]'
     );
     for (var i = dds.length - 1; i >= 0; i--) {
-      if (dds[i].getClientRects().length) return dds[i];
+      if (dds[i].getClientRects().length) { el.__foPopRoot = dds[i]; return dds[i]; }
+    }
+    // 最后兜底：可见的 [role=option]（组件库基本都会给选项加 role）所在容器
+    var roleOpts = document.querySelectorAll('[role="option"],[role="treeitem"]');
+    for (var k = 0; k < roleOpts.length; k++) {
+      if (!roleOpts[k].getClientRects().length) continue;
+      var box = roleOpts[k].closest('[role="listbox"],[role="tree"],[class*="dropdown"],[class*="popup"],[class*="menu"],[class*="panel"]') || roleOpts[k].parentElement;
+      if (box) { el.__foPopRoot = box; return box; }
     }
     return null;
   }
@@ -372,21 +392,62 @@
       if (!p || !p.el) return null;
       p.el.click();
       return true;
-    }, 1800).then(function () {
+    }, 1200, 60).then(function () {
       if (!cityAliases.length) return true;
       return waitFor(function () {
         var c = pickByAliases(comboboxOptionsFromRoot(root || comboboxPopupRoot(el)), cityAliases);
         if (!c || !c.el) return null;
         c.el.click();
         return true;
-      }, 1800);
+      }, 1200, 60);
     });
   }
 
+  /** 组合控件真正的点击热区：antd / Element / Layui 的点击监听常挂在内层 selector 上，点 input 不一定展开 */
+  function comboboxTrigger(el) {
+    var sels = ['.ant-select-selector', '.el-select__wrapper', '.el-select .el-input__inner',
+      '.t-select-input', '.layui-select-title', '[class*="select-input"]',
+      '[class*="select__input"]', '[class*="select-trigger"]'];
+    for (var i = 0; i < sels.length; i++) {
+      var n = el.closest && el.closest(sels[i]);
+      if (n && n.getClientRects && n.getClientRects().length) return n;
+    }
+    return el;
+  }
+
+  /** 打开下拉：首轮点 input，重试轮改点内层热区（组件库监听点不同）；打开前清掉上一次的面板缓存 */
+  function openCombobox(el, alt) {
+    try { el.__foPopRoot = null; } catch (e) { /* noop */ }
+    var t = alt ? comboboxTrigger(el) : el;
+    try { t.click(); } catch (e) { /* noop */ }
+    ['mousedown', 'mouseup'].forEach(function (type) {
+      try { t.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true })); } catch (e) { /* noop */ }
+    });
+  }
+
+  /** 下拉兜底：TDesign 只读输入直接写值 + blur（组件多以 input.value 显示）；其余给失败提示 */
+  function comboboxFallback(el, key, value) {
+    if (el.readOnly && /(^|\s)t-input__inner(\s|$)/.test(String(el.className || ''))) {
+      var fv = readonlyChooserFallbackValue(key, value);
+      try {
+        setNativeValue(el, fv);
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        FO.floatball.toast('已写入下拉：' + String(fv).slice(0, 24) + '（请核对）');
+        return;
+      } catch (e) { /* 继续走失败提示 */ }
+    }
+    FO.floatball.toast('下拉未能匹配：' + String(value).slice(0, 24) + '，请手动选择');
+  }
+
   /**
-   * 组合控件（antd Select / Phoenix Select / TreeSelect 等）异步填充：
-   * click 打开 → 等选项加载（字典接口异步）→ 写搜索词过滤（若可编辑）→ 点选最匹配项 → 校验。
-   * 值以 {value,label} 进组件状态，无法同步确认，完成后 toast 结果；失败重试一次。
+   * 组合控件（antd Select / Phoenix Select / TreeSelect / Layui 等）异步填充：
+   * 打开 → 等面板/选项 → 写搜索词过滤（若可编辑）→ 点选最匹配项 → 校验落值。
+   *
+   * 速度要点（此前下拉填充慢的主因是每个阶段都空等 5s，且失败后整轮重来再等 5s）：
+   *  1) 轮询 60ms：选项一渲染出来立刻点，不再每 160ms 才看一次；
+   *  2) 每阶段短超时（1.5s / 1.2s）——组件库同步渲染时首个轮询即命中，正常路径 <200ms；
+   *  3) 面板压根没出来时直接兜底写值/提示，不再把 5s×2~3 的时间耗在等一个不会出现的下拉上；
+   *  4) 重试轮去掉长等待，改点内层热区（换一种触发方式比再等 5s 有效）。
    */
   function fillCombobox(ctrl, value, attempt) {
     attempt = attempt || 0;
@@ -395,69 +456,59 @@
     var key = ctrl._matchKey || '';
     var aliases = candidateAliases(key, value);
     try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* noop */ }
-    // Phoenix 等组件用 click 打开下拉；antd 用 mousedown
-    el.click();
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-    // 返回 Promise：调用方（拟人化串行填充）需等下拉真正落值后再处理下一个字段，
-    // 否则下一个字段的悬停/滚动会打断仍在展开的下拉。
-    return waitFor(function () { return comboboxOptions(el).length ? true : null; }, 5000)
-      .then(function () {
-        if (isRegionKey(key)) {
-          return clickRegionPath(el, value).then(function (ok) { return ok ? '__done__' : '__continue__'; });
+    openCombobox(el, attempt > 0);
+
+    return waitFor(function () { return comboboxOptions(el).length ? true : null; }, attempt ? 900 : 1500, 60)
+      .then(function (hasOpts) {
+        if (hasOpts && isRegionKey(key)) {
+          return clickRegionPath(el, value).then(function (ok) {
+            return ok ? '__region__' : comboboxFallback(el, key, value);
+          });
         }
-        return '__continue__';
-      })
-      .then(function (special) {
-        if (special === '__done__') return '__done__';
-        // 选项在 focus 时才异步拉取，等首批到位再写搜索词
-        var editable = !el.readOnly;
-        if (editable && want) setNativeValue(el, String(value));
-        return waitFor(function () { return pickInWithAlias(comboboxOptions(el), want, key); }, 5000);
-      })
-      .then(function (pick) {
-        if (pick === '__done__') {
-          return waitFor(function () {
-            var cur0 = comboboxSelected(el);
-            return cur0 && aliases.some(function (a) {
-              return cur0 === a || cur0.indexOf(a) !== -1 || (a.indexOf(cur0) !== -1 && cur0.length >= 2);
-            }) ? cur0 : null;
-          }, 2000);
+        if (!hasOpts) {
+          // 面板没出来：非只读输入先写值（部分站点是原生 input + 自定义下拉），随后立刻校验
+          if (!el.readOnly && want) setNativeValue(el, String(value));
+          return commitComboPick(ctrl, value, aliases, null, attempt);
         }
-        if (!pick) {
-          var rest = comboboxOptions(el);
-          pick = rest.length ? { el: rest[0], fuzzy: true } : null;
-        }
-        if (pick && pick.el) pick.el.click();
-        else commitEnter(el); // 没等到选项：回车赌一把搜索直选
-        return waitFor(function () {
-          var cur = comboboxSelected(el);
-          return cur && aliases.some(function (a) {
-            return cur === a || cur.indexOf(a) !== -1 || (a.indexOf(cur) !== -1 && cur.length >= 2);
-          }) ? cur : null;
-        }, 2000);
-      })
-      .then(function (ok) {
-        if (ok) {
-          FO.floatball.toast('已填入下拉：' + String(value).slice(0, 24));
-        } else if (attempt < 1) {
-          commitEscape(el);
-          return new Promise(function (res) { setTimeout(res, 350); })
-            .then(function () { return fillCombobox(ctrl, value, attempt + 1); });
-        } else {
-          if (el.readOnly && /(^|\s)t-input__inner(\s|$)/.test(String(el.className || ''))) {
-            var fv = readonlyChooserFallbackValue(key, value);
-            try {
-              setNativeValue(el, fv);
-              el.dispatchEvent(new Event('blur', { bubbles: true }));
-              FO.floatball.toast('已写入下拉：' + String(fv).slice(0, 24) + '（请核对）');
-              return;
-            } catch (e) { /* 继续走失败提示 */ }
-          }
-          FO.floatball.toast('下拉未能匹配：' + String(value).slice(0, 24) + '，请手动选择');
-        }
+        // 选项在 focus 时才异步拉取；写入搜索词过滤，多数组件库为同步过滤
+        if (!el.readOnly && want) setNativeValue(el, String(value));
+        var pick = pickInWithAlias(comboboxOptions(el), want, key);
+        if (pick) return commitComboPick(ctrl, value, aliases, pick, attempt);
+        // 异步过滤：只再等 0.8s，不空转 5s；仍未命中则滚动长列表（虚拟列表）继续找
+        return waitFor(function () { return pickInWithAlias(comboboxOptions(el), want, key); }, 800, 60)
+          .then(function (p) {
+            if (p) return commitComboPick(ctrl, value, aliases, p, attempt);
+            return findOptionByScroll(comboboxPopupRoot(el), want, key)
+              .then(function (q) { return commitComboPick(ctrl, value, aliases, q, attempt); });
+          });
       })
       .catch(function () { FO.floatball.toast('下拉填充失败'); });
+  }
+
+  /** 点选目标项 → 校验落值 → 失败重试（短等待）/兜底 */
+  function commitComboPick(ctrl, value, aliases, pick, attempt) {
+    var el = ctrl.el;
+    function selectedAlias() {
+      var cur = comboboxSelected(el);
+      return cur && aliases.some(function (a) {
+        return cur === a || cur.indexOf(a) !== -1 || (a.indexOf(cur) !== -1 && cur.length >= 2);
+      }) ? cur : null;
+    }
+    if (pick === '__region__') {
+      return waitFor(selectedAlias, 1500, 60).then(function () {
+        FO.floatball.toast('已填入下拉：' + String(value).slice(0, 24));
+      });
+    }
+    if (pick && pick.el) pick.el.click();
+    else commitEnter(el); // 没等到选项：回车赌一把搜索直选
+    return waitFor(selectedAlias, 1200, 60).then(function (ok) {
+      if (ok) { FO.floatball.toast('已填入下拉：' + String(value).slice(0, 24)); return; }
+      if (attempt < 1) {
+        commitEscape(el);
+        return sleep(150).then(function () { return fillCombobox(ctrl, value, attempt + 1); });
+      }
+      comboboxFallback(el, ctrl._matchKey || '', value);
+    });
   }
 
   /** 带别名映射的选项匹配 */
@@ -475,6 +526,38 @@
     if (i === -1) i = texts.findIndex(function (t) { return t && t.indexOf(want) !== -1; });
     if (i === -1) i = texts.findIndex(function (t) { return t && want.indexOf(t) !== -1 && t.length >= 2; });
     return i === -1 ? null : { el: opts[i], fuzzy: texts[i] !== want };
+  }
+
+  /** 面板内的可滚动列表容器（虚拟列表只渲染可见项，需要滚动才能取到目标项） */
+  function scrollableIn(root) {
+    if (!root || !root.querySelectorAll) return null;
+    if (root.scrollHeight > root.clientHeight + 4 && root.clientHeight > 40) return root;
+    var cands = root.querySelectorAll('*');
+    for (var i = 0; i < Math.min(cands.length, 60); i++) {
+      var n = cands[i];
+      if (n.clientHeight > 40 && n.scrollHeight > n.clientHeight + 4) return n;
+    }
+    return null;
+  }
+
+  /** 虚拟列表兜底：按一屏步长下滚边找边等渲染（最多 10 跳），结束还原到顶部 */
+  function findOptionByScroll(root, want, key) {
+    var scroller = scrollableIn(root);
+    if (!scroller) return Promise.resolve(null);
+    var step = Math.max(60, Math.floor(scroller.clientHeight * 0.7));
+    var top = 0, hops = 0;
+    function stop(p) {
+      try { scroller.scrollTop = 0; } catch (e) { /* noop */ }
+      return p;
+    }
+    return (function next() {
+      var p = pickInWithAlias(comboboxOptionsFromRoot(root), want, key);
+      if (p) return Promise.resolve(p);
+      if (hops++ >= 10 || top + scroller.clientHeight >= scroller.scrollHeight + step) return stop(null);
+      top = Math.min(top + step, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+      try { scroller.scrollTop = top; } catch (e) { /* noop */ }
+      return sleep(50).then(next);
+    })();
   }
 
   /** 常见字段的值别名映射：简历里的中文值 ↔ 网页 radio/select 的 value/label */

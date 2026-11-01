@@ -160,6 +160,9 @@
     confirmThreshold: 0.5,
     mlEnabled: true,
     ballVisible: true,
+    // 一键填充：遇到「已经有值」的控件就跳过，不覆盖用户手工填/改过的内容。
+    // 关闭后按匹配结果覆盖（此时靠本地修正记忆保证用的是正确字段）。
+    skipFilled: true,
     // 拟人化填充节奏：字段之间随机停顿，避免整页字段在同一 tick 内写完全部值
     fillSpeed: 'normal',   // fast | normal | slow
     humanTyping: false     // 逐字符模拟键盘输入（更自然，但明显更慢）
