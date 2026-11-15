@@ -12,6 +12,8 @@
       document.querySelectorAll('.pane').forEach((x) => x.classList.remove('active'));
       t.classList.add('active');
       $('tab-' + t.dataset.tab).classList.add('active');
+      if (t.dataset.tab === 'corpus' && corpusOverview) onCorpus(corpusOverview);
+      if (t.dataset.tab === 'training') redrawTrainChart();
     });
   });
 
@@ -19,6 +21,15 @@
   let eventSource = null;
   let epochHistory = [];
   let running = false;
+  let corpusOverview = null;
+
+  function setRunning(value) {
+    running = value;
+    $('btn-start').disabled = value;
+    $('btn-apply').disabled = value;
+    $('btn-stop').disabled = !value;
+    window.CorpusManager.setRunning(value);
+  }
 
   function setStatus(state, text) {
     const dot = $('status-dot');
@@ -39,7 +50,8 @@
   // —— 简易 Canvas 图表 ——
   function drawBarChart(canvas, labels, values, opts) {
     const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth, cssH = canvas.height || 220;
+    const cssW = canvas.clientWidth, cssH = parseFloat(canvas.style.height) || 220;
+    if (!cssW) return;
     canvas.width = cssW * dpr; canvas.height = cssH * dpr;
     canvas.style.height = cssH + 'px';
     const ctx = canvas.getContext('2d');
@@ -71,7 +83,8 @@
   function drawLineChart(canvas, series) {
     // series: [{name, color, data:[number|null]}]
     const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth, cssH = canvas.height || 260;
+    const cssW = canvas.clientWidth, cssH = parseFloat(canvas.style.height) || 260;
+    if (!cssW) return;
     canvas.width = cssW * dpr; canvas.height = cssH * dpr;
     canvas.style.height = cssH + 'px';
     const ctx = canvas.getContext('2d');
@@ -151,6 +164,8 @@
 
   // —— 事件处理 ——
   function onReset() {
+    setRunning(true);
+    setStatus('running', '训练中…');
     epochHistory = [];
     $('sample-tbody').innerHTML = '<tr><td colspan="2" class="muted">等待训练启动…</td></tr>';
     $('cleaning-flow').innerHTML = '<p class="muted">等待训练启动…</p>';
@@ -166,6 +181,7 @@
   }
 
   function onCorpus(d) {
+    corpusOverview = d;
     $('stat-total').textContent = d.total.toLocaleString();
     $('stat-synthetic').textContent = d.synthetic.toLocaleString();
     $('stat-real').textContent = d.real.toLocaleString();
@@ -259,6 +275,13 @@
     if (eventSource) eventSource.close();
     eventSource = new EventSource('/api/stream');
 
+    eventSource.addEventListener('state', (e) => {
+      const d = JSON.parse(e.data);
+      setRunning(d.running);
+      if (d.running) setStatus('running', '训练中…');
+      else window.CorpusManager.refresh();
+    });
+
     eventSource.addEventListener('reset', () => onReset());
     eventSource.addEventListener('stage', (e) => {
       const d = JSON.parse(e.data);
@@ -268,7 +291,10 @@
       const d = JSON.parse(e.data);
       log(d.message);
     });
-    eventSource.addEventListener('corpus', (e) => onCorpus(JSON.parse(e.data)));
+    eventSource.addEventListener('corpus', (e) => {
+      onCorpus(JSON.parse(e.data));
+      $('corpus-caption').textContent = '当前训练使用的语料快照';
+    });
     eventSource.addEventListener('cleaning', (e) => onCleaning(JSON.parse(e.data)));
     eventSource.addEventListener('features', (e) => onFeatures(JSON.parse(e.data)));
     eventSource.addEventListener('model', (e) => onModel(JSON.parse(e.data)));
@@ -280,7 +306,7 @@
     });
     eventSource.addEventListener('done', (e) => {
       const d = JSON.parse(e.data);
-      running = false;
+      setRunning(false);
       setStatus(d.stopped ? 'error' : 'idle', d.stopped ? '已停止' : '完成');
       $('btn-start').disabled = false;
       $('btn-stop').disabled = true;
@@ -315,20 +341,22 @@
 
   async function startTrain() {
     if (running) return;
-    running = true;
+    setRunning(true);
     setStatus('running', '训练中…');
     $('btn-start').disabled = true;
     $('btn-stop').disabled = false;
     // 切到训练页
     document.querySelector('.tab[data-tab="training"]').click();
-    const res = await fetch('/api/train', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(getConfig()) });
-    const r = await res.json();
-    if (!r.ok) {
-      running = false;
+    try {
+      const res = await fetch('/api/train', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(getConfig()) });
+      const r = await res.json();
+      if (!res.ok || !r.ok) throw new Error(r.error || '未知');
+    } catch (e) {
+      setRunning(false);
       setStatus('error', '启动失败');
       $('btn-start').disabled = false;
       $('btn-stop').disabled = true;
-      log('✗ 启动失败：' + (r.error || '未知'));
+      log('✗ 启动失败：' + e.message);
     }
   }
 
@@ -345,8 +373,24 @@
     $('cfg-seed').value = 42; $('cfg-samples').value = 6; $('cfg-vocab').value = 3000;
     $('cfg-hidden').value = 128; $('cfg-epochs').value = 30; $('cfg-batch').value = 64;
     $('cfg-lr').value = 0.005; $('cfg-dropout').value = 0.15; $('cfg-val').value = 0.15;
+    window.CorpusManager.refresh();
   });
 
   // 启动
+  window.CorpusManager.init({
+    getConfig,
+    onOverview: (data) => {
+      if (running && corpusOverview) return;
+      onCorpus(data);
+      $('corpus-caption').textContent = '当前参数的语料预览，点击「开始训练」后参与训练';
+    }
+  });
+  ['cfg-seed', 'cfg-samples'].forEach((id) => {
+    $(id).addEventListener('change', () => window.CorpusManager.refresh());
+  });
+  window.addEventListener('resize', () => {
+    if (corpusOverview) onCorpus(corpusOverview);
+    redrawTrainChart();
+  });
   connect();
 })();

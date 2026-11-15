@@ -28,6 +28,7 @@
     <button class="tab" data-tab="cleaning">② 数据清洗</button>
     <button class="tab" data-tab="training">③ 训练过程</button>
     <button class="tab" data-tab="tuning">④ 参数调优</button>
+    <button class="tab" data-tab="samples">语料管理</button>
   </nav>
 
   <main class="content">
@@ -36,6 +37,7 @@
       <div class="grid">
         <div class="card">
           <h3>语料概览</h3>
+          <p class="hint" id="corpus-caption">加载当前配置的语料预览…</p>
           <div class="stats-row" id="corpus-stats">
             <div class="stat"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">总样本数</div></div>
             <div class="stat"><div class="stat-val" id="stat-synthetic">—</div><div class="stat-lbl">合成样本</div></div>
@@ -52,12 +54,65 @@
           <div class="table-wrap">
             <table class="data-table">
               <thead><tr><th>文本</th><th>类别</th></tr></thead>
-              <tbody id="sample-tbody"><tr><td colspan="2" class="muted">等待训练启动…</td></tr></tbody>
+              <tbody id="sample-tbody"><tr><td colspan="2" class="muted">正在加载语料…</td></tr></tbody>
             </table>
           </div>
         </div>
       </div>
     </section>
+
+    <!-- 语料管理 -->
+    <section id="tab-samples" class="pane">
+      <div class="card">
+        <div class="sample-heading">
+          <div>
+            <h3>语料管理</h3>
+            <p class="hint">真实语料保存后参与下一次训练。合成语料由规则生成，可复制为真实语料后修改。</p>
+          </div>
+          <div class="sample-actions">
+            <button id="sample-add" class="btn-primary">新增语料</button>
+            <button id="sample-import" class="btn-ghost">导入 JSONL</button>
+            <button id="sample-export" class="btn-ghost">导出真实语料</button>
+            <button id="sample-refresh" class="btn-ghost">刷新</button>
+            <input id="sample-file" type="file" accept=".jsonl,.ndjson,.json,.txt" hidden />
+          </div>
+        </div>
+        <details class="sample-help">
+          <summary>如何准备和管理训练语料？</summary>
+          <p>文本填写网页上的字段标签，例如「教育经历 毕业院校」；类别选择「教育经历 / 学校」。不要填写个人简历的具体值。</p>
+          <p>可导入扩展侧栏「设置 → 导出样本」生成的 JSONL，或每行一个对象：<code>{"text":"教育经历 毕业院校","label":"education.school"}</code>。</p>
+          <p>新增、编辑和删除自动保存到 <code>ml/train/fillout-samples.jsonl</code>。导入会跳过相同文本和类别的重复记录；如有错误行，整批不保存。导出包含全部真实语料，不受筛选影响。</p>
+          <p>合成语料的数量受「参数调优」中的随机种子和每 pattern 样本数影响。字段文本须为 2～200 个字符，以符合训练清洗规则。训练期间可浏览和导出，修改操作在训练结束后恢复。</p>
+        </details>
+        <div class="sample-filters">
+          <label>搜索文本或类别<input id="sample-search" type="search" placeholder="例如：毕业院校、education.school" /></label>
+          <label>来源<select id="sample-source"><option value="all">全部语料</option><option value="real">真实语料（可编辑）</option><option value="synthetic">合成语料（规则生成）</option></select></label>
+          <label>字段类别<select id="sample-filter-label"><option value="">全部类别</option></select></label>
+        </div>
+        <p id="sample-message" class="sample-message" role="status" aria-live="polite"></p>
+        <div class="table-wrap sample-table-wrap">
+          <table class="data-table">
+            <thead><tr><th>字段标签文本</th><th>类别</th><th>来源</th><th>操作</th></tr></thead>
+            <tbody id="sample-list"><tr><td colspan="4" class="muted">正在加载语料…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="sample-pagination">
+          <span id="sample-count" class="hint"></span>
+          <div><button id="sample-prev" class="btn-ghost">上一页</button><span id="sample-page"></span><button id="sample-next" class="btn-ghost">下一页</button></div>
+        </div>
+      </div>
+    </section>
+
+    <dialog id="sample-dialog" aria-labelledby="sample-dialog-title">
+      <form id="sample-form">
+        <h3 id="sample-dialog-title">新增语料</h3>
+        <p class="hint">填写网页字段标签及其对应类别，保存后用于下次训练。</p>
+        <label>字段标签文本<textarea id="sample-text" rows="4" required placeholder="例如：教育经历 毕业院校"></textarea></label>
+        <label>字段类别<select id="sample-edit-label" required></select></label>
+        <p id="sample-form-error" class="sample-message error" role="alert"></p>
+        <div class="sample-actions"><button type="button" id="sample-cancel" class="btn-ghost">取消</button><button type="submit" id="sample-save" class="btn-primary">保存语料</button></div>
+      </form>
+    </dialog>
 
     <!-- 清洗 -->
     <section id="tab-cleaning" class="pane">
@@ -128,6 +183,7 @@
     </section>
   </main>
 
+  <script src="corpus-manager.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

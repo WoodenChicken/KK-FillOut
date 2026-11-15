@@ -18,28 +18,11 @@ const fs = require('fs');
 const path = require('path');
 
 const { mergeConfig } = require('./config');
-const { generateSynthetic, classDistribution } = require('./corpus');
+const { loadFO, buildDataset } = require('./dataset');
 const { clean } = require('./cleaning');
 const { buildVocab, featurize, sparsity } = require('./features');
 const { buildModel, describeModel, estimateModelSize } = require('./model');
 const { evaluate } = require('./evaluate');
-
-// 加载 FO（schema + matcher）
-function loadFO() {
-  globalThis.window = globalThis;
-  require('../../extension/utils/schema.js');
-  require('../../extension/content/matcher.js');
-  return globalThis.FO;
-}
-
-function loadRealSamples(dir, keys) {
-  const f = path.join(dir, 'fillout-samples.jsonl');
-  if (!fs.existsSync(f)) return [];
-  const keySet = new Set(keys);
-  return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => {
-    try { return JSON.parse(l); } catch (e) { return null; }
-  }).filter((r) => r && r.text && r.label && keySet.has(r.label));
-}
 
 async function runTraining(userConfig, callbacks) {
   const cb = callbacks || {};
@@ -49,26 +32,14 @@ async function runTraining(userConfig, callbacks) {
 
   const cfg = mergeConfig(userConfig);
   log('[FillOut] 加载 schema + matcher…');
-  const FO = loadFO();
-  const DICT = FO.matcher.DICT;
-  const KEYS = FO.allMatchKeys().filter((k) => DICT[k]);
 
   // —— 1. 语料 ——
   emit('onStage', { stage: 'corpus' });
   log('[FillOut] 生成合成语料…');
-  const synthetic = generateSynthetic(KEYS, DICT, cfg);
-  const realSamples = loadRealSamples(__dirname, KEYS);
-  const allRaw = synthetic.concat(realSamples);
-  const dist = classDistribution(allRaw, KEYS);
+  const dataset = buildDataset(cfg);
+  const { keys: KEYS, synthetic, real: realSamples, rows: allRaw } = dataset;
   log(`[FillOut] 语料：合成 ${synthetic.length} + 真实 ${realSamples.length} = ${allRaw.length} 条，类别 ${KEYS.length}`);
-  emit('onCorpus', {
-    total: allRaw.length,
-    synthetic: synthetic.length,
-    real: realSamples.length,
-    numClasses: KEYS.length,
-    perClass: dist,
-    samples: allRaw.slice(0, 30) // 抽样展示
-  });
+  emit('onCorpus', dataset.overview);
 
   // —— 2. 清洗 ——
   emit('onStage', { stage: 'cleaning' });

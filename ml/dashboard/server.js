@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { runTraining } = require('../train/train-lib');
+const { handleCorpus } = require('./corpus-api');
 
 const PORT = parseInt(process.env.PORT, 10) || 5173;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -118,6 +119,7 @@ function handleStream(res) {
   for (const h of state.history) {
     try { sendEvent(res, h.event, h.data); } catch (e) { break; }
   }
+  sendEvent(res, 'state', { running: state.running });
   clients.add(res);
   const alive = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch (e) {} }, 15000);
   req_on_close: {
@@ -130,8 +132,27 @@ function handleStream(res) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e6) reject(new Error('body too large')); });
-    req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch (e) { reject(e); } });
+    let bytes = 0;
+    let oversized = false;
+    req.setEncoding('utf8');
+    req.on('data', (c) => {
+      if (oversized) return;
+      bytes += Buffer.byteLength(c, 'utf8');
+      if (bytes > 10 * 1024 * 1024) {
+        oversized = true;
+        body = '';
+        const error = new Error('请求内容超过 10MB，请拆分文件后导入');
+        error.status = 413;
+        reject(error);
+        return;
+      }
+      body += c;
+    });
+    req.on('end', () => {
+      if (oversized) return;
+      try { resolve(JSON.parse(body || '{}')); }
+      catch (e) { e.status = 400; reject(e); }
+    });
     req.on('error', reject);
   });
 }
@@ -139,6 +160,7 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   const url = req.url.split('?')[0];
   try {
+    if (await handleCorpus(req, res, readBody, () => state.running)) return;
     if (url === '/api/stream' && req.method === 'GET') {
       handleStream(res);
       return;
@@ -150,10 +172,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (url === '/api/train' && req.method === 'POST') {
       const config = await readBody(req);
-      // 异步启动，不阻塞响应
-      const r = await startTraining(config);
+      if (state.running) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: '训练已在运行中' }));
+        return;
+      }
+      // 立即返回，训练进度通过 SSE 上报。
+      const task = startTraining(config);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(r));
+      res.end(JSON.stringify({ ok: true }));
+      void task;
       return;
     }
     if (url === '/api/stop' && req.method === 'POST') {
@@ -164,7 +192,7 @@ const server = http.createServer(async (req, res) => {
     }
     handleStatic(req, res);
   } catch (e) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.writeHead(e.status || 500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }));
   }
 });

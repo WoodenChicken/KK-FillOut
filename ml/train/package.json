@@ -5,7 +5,8 @@
   "description": "FillOut 字段分类模型离线训练脚本",
   "scripts": {
     "train": "node train.js",
-    "dashboard": "node ../dashboard/server.js"
+    "dashboard": "node ../dashboard/server.js",
+    "test:corpus": "node --test ../dashboard/corpus-management.test.js"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0"
